@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_gestion_gastos.breakdown_view import ExpenseBreakdownDialog
 from app_gestion_gastos.services import ExpenseService
 
 
@@ -119,8 +120,11 @@ class MainWindow(QMainWindow):
 
         add_button = QPushButton("Añadir gasto")
         add_button.clicked.connect(self._open_expense_dialog)
+        breakdown_button = QPushButton("Ver desglose")
+        breakdown_button.clicked.connect(self._open_breakdown)
 
         toolbar = QHBoxLayout()
+        toolbar.addWidget(breakdown_button)
         toolbar.addStretch()
         toolbar.addWidget(add_button)
         layout = QVBoxLayout()
@@ -153,3 +157,6 @@ class MainWindow(QMainWindow):
         dialog = ExpenseDialog(self._service, self)
         if dialog.exec() == ExpenseDialog.DialogCode.Accepted:
             self.refresh()
+
+    def _open_breakdown(self) -> None:
+        ExpenseBreakdownDialog(self._service, self).exec()

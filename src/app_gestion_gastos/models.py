@@ -24,3 +24,11 @@ class Expense:
         amount_cents = self.amount * 100
         if amount_cents != amount_cents.to_integral_value():
             raise ValueError("El importe no puede tener mas de dos decimales.")
+
+
+@dataclass(frozen=True, slots=True)
+class ExpenseBreakdown:
+    month: str
+    category: str
+    subcategory: str
+    amount: Decimal

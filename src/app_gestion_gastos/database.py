@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from app_gestion_gastos.models import Expense
+from app_gestion_gastos.models import Expense, ExpenseBreakdown
 
 SCHEMA = (
     """
@@ -245,3 +245,106 @@ class SQLiteDatabase:
             )
             for row in rows
         ]
+
+    def get_expenses_for_month(self, year: int, month: int) -> list[Expense]:
+        start, end = self._month_bounds(year, month)
+        return self._get_expenses(
+            "expenses.expense_date >= ? AND expenses.expense_date < ?", (start, end)
+        )
+
+    def get_expenses_for_month_and_category(
+        self, year: int, month: int, category_id: int
+    ) -> list[Expense]:
+        start, end = self._month_bounds(year, month)
+        return self._get_expenses(
+            "expenses.expense_date >= ? AND expenses.expense_date < ? "
+            "AND expenses.category_id = ?",
+            (start, end, category_id),
+        )
+
+    def get_expenses_for_month_and_subcategory(
+        self, year: int, month: int, subcategory_id: int
+    ) -> list[Expense]:
+        start, end = self._month_bounds(year, month)
+        return self._get_expenses(
+            "expenses.expense_date >= ? AND expenses.expense_date < ? "
+            "AND expenses.subcategory_id = ?",
+            (start, end, subcategory_id),
+        )
+
+    def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal:
+        if end_date < start_date:
+            raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(SUM(amount), 0) AS total "
+                "FROM expenses WHERE expense_date BETWEEN ? AND ?",
+                (start_date.isoformat(), end_date.isoformat()),
+            ).fetchone()
+        return Decimal(row["total"]) / 100
+
+    def get_breakdown_between_dates(
+        self, start_date: date, end_date: date
+    ) -> list[ExpenseBreakdown]:
+        if end_date < start_date:
+            raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    strftime('%Y-%m', expenses.expense_date) AS month,
+                    COALESCE(categories.name, 'Sin categoria') AS category,
+                    COALESCE(subcategories.name, 'Sin subcategoria') AS subcategory,
+                    SUM(expenses.amount) AS amount
+                FROM expenses
+                LEFT JOIN categories ON categories.id = expenses.category_id
+                LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id
+                WHERE expenses.expense_date BETWEEN ? AND ?
+                GROUP BY month, category, subcategory
+                ORDER BY month, category COLLATE NOCASE, subcategory COLLATE NOCASE
+                """,
+                (start_date.isoformat(), end_date.isoformat()),
+            ).fetchall()
+        return [
+            ExpenseBreakdown(
+                month=row["month"],
+                category=row["category"],
+                subcategory=row["subcategory"],
+                amount=Decimal(row["amount"]) / 100,
+            )
+            for row in rows
+        ]
+
+    def _get_expenses(self, where_clause: str, parameters: tuple[object, ...]) -> list[Expense]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT expenses.id, COALESCE(categories.name, 'Sin categoria') AS category, "
+                "COALESCE(subcategories.name, 'Sin subcategoria') AS subcategory, "
+                "expenses.description, expenses.amount, expenses.expense_date "
+                "FROM expenses "
+                "LEFT JOIN categories ON categories.id = expenses.category_id "
+                "LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id "
+                f"WHERE {where_clause} "
+                "ORDER BY expenses.expense_date DESC, expenses.id DESC",
+                parameters,
+            ).fetchall()
+        return [
+            Expense(
+                id=row["id"],
+                category=row["category"],
+                description=row["description"],
+                amount=Decimal(row["amount"]) / 100,
+                spent_on=date.fromisoformat(row["expense_date"]),
+                subcategory=row["subcategory"],
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _month_bounds(year: int, month: int) -> tuple[str, str]:
+        start = date(year, month, 1)
+        if month == 12:
+            end = date(year + 1, 1, 1)
+        else:
+            end = date(year, month + 1, 1)
+        return start.isoformat(), end.isoformat()

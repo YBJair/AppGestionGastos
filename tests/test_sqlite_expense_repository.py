@@ -41,6 +41,47 @@ def test_repository_persists_and_reads_expenses(tmp_path) -> None:
     assert row["expense_date"] == "2026-10-01"
 
 
+def test_month_queries_and_date_range_total(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "queries.sqlite3")
+    database.initialize()
+    expenses = (
+        Expense("Hogar", "Renta", Decimal("160.17"), date(2026, 2, 1), subcategory="Renta"),
+        Expense("Hogar", "Luz", Decimal("69.03"), date(2026, 2, 15), subcategory="Luz"),
+        Expense(
+            "Mascotas", "Comida", Decimal("37.45"), date(2026, 2, 28), subcategory="Comida"
+        ),
+        Expense("Hogar", "Renta", Decimal("10.00"), date(2026, 3, 1), subcategory="Renta"),
+    )
+    for expense in expenses:
+        database.add(expense)
+
+    with database.connect() as connection:
+        category_id = connection.execute(
+            "SELECT id FROM categories WHERE name = 'Hogar'"
+        ).fetchone()["id"]
+        subcategory_id = connection.execute(
+            "SELECT id FROM subcategories WHERE name = 'Luz'"
+        ).fetchone()["id"]
+
+    february = database.get_expenses_for_month(2026, 2)
+    category_expenses = database.get_expenses_for_month_and_category(2026, 2, category_id)
+    subcategory_expenses = database.get_expenses_for_month_and_subcategory(
+        2026, 2, subcategory_id
+    )
+
+    assert {expense.description for expense in february} == {"Renta", "Luz", "Comida"}
+    assert {expense.description for expense in category_expenses} == {"Renta", "Luz"}
+    assert [expense.description for expense in subcategory_expenses] == ["Luz"]
+    assert database.get_total_between_dates(date(2026, 2, 1), date(2026, 2, 28)) == Decimal(
+        "266.65"
+    )
+    assert database.get_total_between_dates(date(2026, 2, 15), date(2026, 3, 1)) == Decimal(
+        "116.48"
+    )
+    breakdown = database.get_breakdown_between_dates(date(2026, 2, 1), date(2026, 2, 28))
+    assert sum((entry.amount for entry in breakdown), Decimal("0")) == Decimal("266.65")
+
+
 def test_initialize_creates_all_requested_tables(tmp_path) -> None:
     database = SQLiteDatabase(tmp_path / "schema.sqlite3")
     database.initialize()

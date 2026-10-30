@@ -82,3 +82,22 @@ def test_register_expense_requires_subcategory() -> None:
             spent_on=date(2026, 10, 30),
             subcategory=" ",
         )
+
+    def get_expenses_for_month(self, year: int, month: int) -> list[Expense]:
+        return []
+
+    def get_expenses_for_month_and_category(
+        self, year: int, month: int, category_id: int
+    ) -> list[Expense]:
+        return []
+
+    def get_expenses_for_month_and_subcategory(
+        self, year: int, month: int, subcategory_id: int
+    ) -> list[Expense]:
+        return []
+
+    def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal:
+        return Decimal("0")
+
+    def get_breakdown_between_dates(self, start_date: date, end_date: date) -> list:
+        return []

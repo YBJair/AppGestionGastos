@@ -7,10 +7,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QApplication
 
-from app_gestion_gastos.breakdown_view import ExpenseBreakdownDialog
 from app_gestion_gastos.database import SQLiteDatabase
 from app_gestion_gastos.models import Expense
 from app_gestion_gastos.services import ExpenseService
+from app_gestion_gastos.ui import MainWindow
 
 
 def test_breakdown_view_groups_month_category_and_subcategory(tmp_path) -> None:
@@ -30,22 +30,26 @@ def test_breakdown_view_groups_month_category_and_subcategory(tmp_path) -> None:
             "Mascotas", "Comida", Decimal("37.45"), date(2026, 2, 28), subcategory="Comida"
         )
     )
-    dialog = ExpenseBreakdownDialog(ExpenseService(database))
+    window = MainWindow(ExpenseService(database))
+    assert window.tabs.count() == 2
+    assert window.tabs.tabText(1) == "Desglose"
+    window.tabs.setCurrentIndex(1)
+    view = window.breakdown_view
 
-    dialog.year_input.setValue(2026)
-    dialog._generate()
+    view.year_input.setValue(2026)
+    view._generate()
 
-    assert dialog.results_tree.topLevelItemCount() == 1
-    month_item = dialog.results_tree.topLevelItem(0)
+    assert view.results_tree.topLevelItemCount() == 1
+    month_item = view.results_tree.topLevelItem(0)
     assert month_item.text(0) == "feb 2026"
     assert month_item.text(1) == "266,65 €"
     assert month_item.childCount() == 2
-    assert dialog.total_label.text() == "Total: 266,65 €"
+    assert view.total_label.text() == "Total: 266,65 €"
 
-    dialog.period_tabs.setCurrentIndex(1)
-    dialog.start_date_input.setDate(QDate(2026, 2, 1))
-    dialog.end_date_input.setDate(QDate(2026, 2, 15))
-    dialog._generate()
+    view.period_tabs.setCurrentIndex(1)
+    view.start_date_input.setDate(QDate(2026, 2, 1))
+    view.end_date_input.setDate(QDate(2026, 2, 15))
+    view._generate()
 
-    assert dialog.total_label.text() == "Total: 229,20 €"
+    assert view.total_label.text() == "Total: 229,20 €"
     application.processEvents()

@@ -4,7 +4,6 @@ from decimal import Decimal
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QDateEdit,
-    QDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -37,13 +36,10 @@ MONTH_NAMES = (
 )
 
 
-class ExpenseBreakdownDialog(QDialog):
+class ExpenseBreakdownView(QWidget):
     def __init__(self, service: ExpenseService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._service = service
-        self.setWindowTitle("Desglose de gastos")
-        self.resize(760, 560)
-
         self.period_tabs = QTabWidget()
         year_tab = QWidget()
         self.year_input = QSpinBox()

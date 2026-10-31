@@ -6,7 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
-from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown
+from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown, ExpenseSuggestion
 
 SCHEMA = (
     """
@@ -118,6 +118,32 @@ class SQLiteDatabase:
                 (category.strip(),),
             )
             return [row["name"] for row in rows]
+
+    def list_expense_descriptions(self) -> list[str]:
+        return sorted(
+            {suggestion.description for suggestion in self.list_expense_suggestions()},
+            key=str.casefold,
+        )
+
+    def list_expense_suggestions(self) -> list[ExpenseSuggestion]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT expenses.description, categories.name AS category, "
+                "subcategories.name AS subcategory "
+                "FROM expenses "
+                "LEFT JOIN categories ON categories.id = expenses.category_id "
+                "LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id "
+                "WHERE description IS NOT NULL AND length(trim(description)) > 0 "
+                "ORDER BY expenses.id DESC"
+            )
+            return [
+                ExpenseSuggestion(
+                    description=row["description"],
+                    category=row["category"],
+                    subcategory=row["subcategory"],
+                )
+                for row in rows
+            ]
 
     @staticmethod
     def _migrate(connection: sqlite3.Connection) -> None:

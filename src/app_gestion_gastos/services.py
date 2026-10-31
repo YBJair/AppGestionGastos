@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal, Protocol
 
-from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown
+from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown, ExpenseSuggestion
 
 
 class ExpenseRepository(Protocol):
@@ -13,6 +13,10 @@ class ExpenseRepository(Protocol):
     def list_categories(self) -> list[str]: ...
 
     def list_subcategories(self, category: str) -> list[str]: ...
+
+    def list_expense_descriptions(self) -> list[str]: ...
+
+    def list_expense_suggestions(self) -> list[ExpenseSuggestion]: ...
 
     def get_expenses_for_month(self, year: int, month: int) -> list[Expense]: ...
 
@@ -80,6 +84,12 @@ class ExpenseService:
         if not category.strip():
             return []
         return self._repository.list_subcategories(category.strip())
+
+    def list_expense_descriptions(self) -> list[str]:
+        return self._repository.list_expense_descriptions()
+
+    def list_expense_suggestions(self) -> list[ExpenseSuggestion]:
+        return self._repository.list_expense_suggestions()
 
     def get_expenses_for_month(self, year: int, month: int) -> list[Expense]:
         return self._repository.get_expenses_for_month(year, month)

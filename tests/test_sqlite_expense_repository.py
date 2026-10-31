@@ -41,6 +41,23 @@ def test_repository_persists_and_reads_expenses(tmp_path) -> None:
     assert row["expense_date"] == "2026-10-01"
 
 
+def test_list_expense_descriptions_returns_distinct_non_empty_values(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "descriptions.sqlite3")
+    database.initialize()
+    for description in ("Compra mensual", "Compra mensual", "Factura de agua"):
+        database.add(
+            Expense(
+                category="Hogar",
+                description=description,
+                amount=Decimal("10.00"),
+                spent_on=date(2026, 10, 1),
+                subcategory="General",
+            )
+        )
+
+    assert database.list_expense_descriptions() == ["Compra mensual", "Factura de agua"]
+
+
 def test_month_queries_and_date_range_total(tmp_path) -> None:
     database = SQLiteDatabase(tmp_path / "queries.sqlite3")
     database.initialize()

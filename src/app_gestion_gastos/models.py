@@ -39,3 +39,10 @@ class ChartData:
     period: str
     category: str | None
     amount: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class ExpenseSuggestion:
+    description: str
+    category: str | None
+    subcategory: str | None

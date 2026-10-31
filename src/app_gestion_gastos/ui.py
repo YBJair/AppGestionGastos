@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app_gestion_gastos.breakdown_view import ExpenseBreakdownView
+from app_gestion_gastos.chart_view import ExpenseChartView
 from app_gestion_gastos.services import ExpenseService
 
 
@@ -131,9 +132,13 @@ class MainWindow(QMainWindow):
         container = QWidget()
         container.setLayout(layout)
         self.tabs = QTabWidget()
-        self.tabs.addTab(container, "Gastos")
+        self.chart_view = ExpenseChartView(service)
+        self.tabs.addTab(self.chart_view, "Gráfico")
         self.breakdown_view = ExpenseBreakdownView(service)
         self.tabs.addTab(self.breakdown_view, "Desglose")
+        self.tabs.addTab(container, "Gastos")
+        self.tabs.setCurrentWidget(self.chart_view)
+        self.tabs.currentChanged.connect(self._main_tab_changed)
         self.setCentralWidget(self.tabs)
         self.refresh()
 
@@ -154,8 +159,13 @@ class MainWindow(QMainWindow):
                     alignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     item.setTextAlignment(alignment)
                 self.table.setItem(row_index, column_index, item)
+        self.chart_view.refresh()
 
     def _open_expense_dialog(self) -> None:
         dialog = ExpenseDialog(self._service, self)
         if dialog.exec() == ExpenseDialog.DialogCode.Accepted:
             self.refresh()
+
+    def _main_tab_changed(self, index: int) -> None:
+        if self.tabs.widget(index) is self.chart_view:
+            self.chart_view.refresh()

@@ -1,11 +1,12 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
-from app_gestion_gastos.models import Expense, ExpenseBreakdown
+from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown
 
 SCHEMA = (
     """
@@ -272,6 +273,22 @@ class SQLiteDatabase:
             (start, end, subcategory_id),
         )
 
+    def get_expenses_for_week(self, year: int, week: int) -> list[Expense]:
+        start, end = self._week_bounds(year, week)
+        return self._get_expenses(
+            "expenses.expense_date >= ? AND expenses.expense_date < ?", (start, end)
+        )
+
+    def get_expenses_for_week_and_category(
+        self, year: int, week: int, category_id: int
+    ) -> list[Expense]:
+        start, end = self._week_bounds(year, week)
+        return self._get_expenses(
+            "expenses.expense_date >= ? AND expenses.expense_date < ? "
+            "AND expenses.category_id = ?",
+            (start, end, category_id),
+        )
+
     def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal:
         if end_date < start_date:
             raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
@@ -315,6 +332,57 @@ class SQLiteDatabase:
             for row in rows
         ]
 
+    def get_chart_data(
+        self,
+        start_date: date,
+        end_date: date,
+        period_unit: Literal["month", "week"],
+        by_category: bool,
+    ) -> list[ChartData]:
+        if end_date < start_date:
+            raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
+        if period_unit == "month":
+            period_expression = "strftime('%Y-%m', expenses.expense_date)"
+        elif period_unit == "week":
+            period_expression = (
+                "date(expenses.expense_date, '-' || "
+                "((CAST(strftime('%w', expenses.expense_date) AS INTEGER) + 6) % 7) "
+                "|| ' days')"
+            )
+        else:
+            raise ValueError("El periodo debe ser 'month' o 'week'.")
+
+        category_expression = "COALESCE(categories.name, 'Sin categoria')"
+        category_select = f", {category_expression} AS category" if by_category else ""
+        category_group = ", category" if by_category else ""
+        category_join = (
+            "LEFT JOIN categories ON categories.id = expenses.category_id "
+            if by_category
+            else ""
+        )
+        category_order = ", category COLLATE NOCASE" if by_category else ""
+        query = (
+            f"SELECT {period_expression} AS period{category_select}, "
+            "SUM(expenses.amount) AS amount "
+            "FROM expenses "
+            f"{category_join}"
+            "WHERE expenses.expense_date BETWEEN ? AND ? "
+            f"GROUP BY period{category_group} "
+            f"ORDER BY period{category_order}"
+        )
+        with self.connect() as connection:
+            rows = connection.execute(
+                query, (start_date.isoformat(), end_date.isoformat())
+            ).fetchall()
+        return [
+            ChartData(
+                period=row["period"],
+                category=row["category"] if by_category else None,
+                amount=Decimal(row["amount"]) / 100,
+            )
+            for row in rows
+        ]
+
     def _get_expenses(self, where_clause: str, parameters: tuple[object, ...]) -> list[Expense]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -347,4 +415,10 @@ class SQLiteDatabase:
             end = date(year + 1, 1, 1)
         else:
             end = date(year, month + 1, 1)
+        return start.isoformat(), end.isoformat()
+
+    @staticmethod
+    def _week_bounds(year: int, week: int) -> tuple[str, str]:
+        start = date.fromisocalendar(year, week, 1)
+        end = start + timedelta(days=7)
         return start.isoformat(), end.isoformat()

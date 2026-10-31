@@ -24,6 +24,9 @@ La base de datos se crea automaticamente en `~/.app_gestion_gastos/gastos.sqlite
 Incluye las tablas `categories`, `subcategories`, `expenses`, `import_jobs` e
 `import_items`. Los importes se guardan como centavos enteros para evitar errores
 de precision.
+La pestaña **Gráfico** permite consultar por año, mes o rango de fechas, con barras
+por categoría o por total del período. Los rangos de hasta un mes se agrupan por
+semanas; los más amplios, por meses.
 
 ## Pruebas
 
@@ -40,5 +43,7 @@ src/app_gestion_gastos/
 |-- database.py   # Persistencia SQLite
 |-- services.py   # Casos de uso
 |-- ui.py         # Ventana y formulario PySide6
+|-- breakdown_view.py # Desglose jerarquico
+|-- chart_view.py # Graficos de barras
 tests/            # Pruebas de servicio y persistencia
 ```

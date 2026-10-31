@@ -32,3 +32,10 @@ class ExpenseBreakdown:
     category: str
     subcategory: str
     amount: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class ChartData:
+    period: str
+    category: str | None
+    amount: Decimal

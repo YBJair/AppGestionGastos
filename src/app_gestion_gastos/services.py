@@ -1,8 +1,8 @@
 from datetime import date
 from decimal import Decimal
-from typing import Protocol
+from typing import Literal, Protocol
 
-from app_gestion_gastos.models import Expense, ExpenseBreakdown
+from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown
 
 
 class ExpenseRepository(Protocol):
@@ -24,11 +24,25 @@ class ExpenseRepository(Protocol):
         self, year: int, month: int, subcategory_id: int
     ) -> list[Expense]: ...
 
+    def get_expenses_for_week(self, year: int, week: int) -> list[Expense]: ...
+
+    def get_expenses_for_week_and_category(
+        self, year: int, week: int, category_id: int
+    ) -> list[Expense]: ...
+
     def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal: ...
 
     def get_breakdown_between_dates(
         self, start_date: date, end_date: date
     ) -> list[ExpenseBreakdown]: ...
+
+    def get_chart_data(
+        self,
+        start_date: date,
+        end_date: date,
+        period_unit: Literal["month", "week"],
+        by_category: bool,
+    ) -> list[ChartData]: ...
 
 
 class ExpenseService:
@@ -82,6 +96,14 @@ class ExpenseService:
             year, month, subcategory_id
         )
 
+    def get_expenses_for_week(self, year: int, week: int) -> list[Expense]:
+        return self._repository.get_expenses_for_week(year, week)
+
+    def get_expenses_for_week_and_category(
+        self, year: int, week: int, category_id: int
+    ) -> list[Expense]:
+        return self._repository.get_expenses_for_week_and_category(year, week, category_id)
+
     def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal:
         return self._repository.get_total_between_dates(start_date, end_date)
 
@@ -89,3 +111,12 @@ class ExpenseService:
         self, start_date: date, end_date: date
     ) -> list[ExpenseBreakdown]:
         return self._repository.get_breakdown_between_dates(start_date, end_date)
+
+    def get_chart_data(
+        self,
+        start_date: date,
+        end_date: date,
+        period_unit: Literal["month", "week"],
+        by_category: bool,
+    ) -> list[ChartData]:
+        return self._repository.get_chart_data(start_date, end_date, period_unit, by_category)

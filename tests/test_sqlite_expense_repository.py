@@ -82,6 +82,42 @@ def test_month_queries_and_date_range_total(tmp_path) -> None:
     assert sum((entry.amount for entry in breakdown), Decimal("0")) == Decimal("266.65")
 
 
+def test_iso_week_queries_and_chart_aggregates(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "weeks.sqlite3")
+    database.initialize()
+    expenses = (
+        Expense("Hogar", "Factura", Decimal("12.50"), date(2025, 12, 29), subcategory="Luz"),
+        Expense("Hogar", "Compra", Decimal("5.00"), date(2026, 1, 4), subcategory="Cocina"),
+        Expense(
+            "Transporte", "Abono", Decimal("20.00"), date(2026, 1, 5), subcategory="Público"
+        ),
+    )
+    for expense in expenses:
+        database.add(expense)
+
+    with database.connect() as connection:
+        household_id = connection.execute(
+            "SELECT id FROM categories WHERE name = 'Hogar'"
+        ).fetchone()["id"]
+
+    first_iso_week = database.get_expenses_for_week(2026, 1)
+    household_week = database.get_expenses_for_week_and_category(2026, 1, household_id)
+    weekly_totals = database.get_chart_data(
+        date(2025, 12, 29), date(2026, 1, 11), "week", False
+    )
+    weekly_categories = database.get_chart_data(
+        date(2025, 12, 29), date(2026, 1, 11), "week", True
+    )
+
+    assert {expense.description for expense in first_iso_week} == {"Factura", "Compra"}
+    assert {expense.description for expense in household_week} == {"Factura", "Compra"}
+    assert [(item.period, item.amount) for item in weekly_totals] == [
+        ("2025-12-29", Decimal("17.50")),
+        ("2026-01-05", Decimal("20.00")),
+    ]
+    assert {item.category for item in weekly_categories} == {"Hogar", "Transporte"}
+
+
 def test_initialize_creates_all_requested_tables(tmp_path) -> None:
     database = SQLiteDatabase(tmp_path / "schema.sqlite3")
     database.initialize()

@@ -2,7 +2,14 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal, Protocol
 
-from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown, ExpenseSuggestion
+from app_gestion_gastos.models import (
+    ChartData,
+    Expense,
+    ExpenseBreakdown,
+    ExpenseSuggestion,
+    ImportClassification,
+    ImportProcessingResult,
+)
 
 
 class ExpenseRepository(Protocol):
@@ -17,6 +24,18 @@ class ExpenseRepository(Protocol):
     def list_expense_descriptions(self) -> list[str]: ...
 
     def list_expense_suggestions(self) -> list[ExpenseSuggestion]: ...
+
+    def classify_import_description(
+        self, normalized_description: str
+    ) -> ImportClassification: ...
+
+    def add_import_item(
+        self,
+        import_job_id: int,
+        raw_description: str,
+        amount: Decimal,
+        expense_date: date,
+    ) -> ImportProcessingResult: ...
 
     def get_expenses_for_month(self, year: int, month: int) -> list[Expense]: ...
 
@@ -90,6 +109,20 @@ class ExpenseService:
 
     def list_expense_suggestions(self) -> list[ExpenseSuggestion]:
         return self._repository.list_expense_suggestions()
+
+    def classify_import_description(self, normalized_description: str) -> ImportClassification:
+        return self._repository.classify_import_description(normalized_description)
+
+    def add_import_item(
+        self,
+        import_job_id: int,
+        raw_description: str,
+        amount: Decimal,
+        expense_date: date,
+    ) -> ImportProcessingResult:
+        return self._repository.add_import_item(
+            import_job_id, raw_description, amount, expense_date
+        )
 
     def get_expenses_for_month(self, year: int, month: int) -> list[Expense]:
         return self._repository.get_expenses_for_month(year, month)

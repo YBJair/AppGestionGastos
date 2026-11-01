@@ -6,7 +6,19 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
-from app_gestion_gastos.models import ChartData, Expense, ExpenseBreakdown, ExpenseSuggestion
+from rapidfuzz import fuzz, process
+
+from app_gestion_gastos.models import (
+    ChartData,
+    Expense,
+    ExpenseBreakdown,
+    ExpenseSuggestion,
+    ImportClassification,
+    ImportProcessingResult,
+)
+from app_gestion_gastos.text_utils import normalize_text
+
+IMPORT_MATCH_THRESHOLD = 90
 
 SCHEMA = (
     """
@@ -33,7 +45,9 @@ SCHEMA = (
         category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
         subcategory_id INTEGER REFERENCES subcategories(id) ON DELETE SET NULL,
         source TEXT NOT NULL DEFAULT 'manual',
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        import_job_id INTEGER REFERENCES import_jobs(id) ON DELETE SET NULL,
+        import_item_id INTEGER REFERENCES import_items(id) ON DELETE SET NULL
     )
     """,
     """
@@ -50,6 +64,7 @@ SCHEMA = (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         import_job_id INTEGER NOT NULL REFERENCES import_jobs(id) ON DELETE CASCADE,
         raw_description TEXT NOT NULL,
+            user_description TEXT,
         normalized_description TEXT,
         amount INTEGER NOT NULL CHECK (amount > 0),
         expense_date TEXT NOT NULL,
@@ -67,6 +82,8 @@ INDEX_SCHEMA = (
     "CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id)",
     "CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date)",
     "CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id)",
+    "CREATE INDEX IF NOT EXISTS idx_expenses_import_job ON expenses(import_job_id)",
+    "CREATE INDEX IF NOT EXISTS idx_expenses_import_item ON expenses(import_item_id)",
     "CREATE INDEX IF NOT EXISTS idx_import_items_job ON import_items(import_job_id)",
 )
 
@@ -145,6 +162,141 @@ class SQLiteDatabase:
                 for row in rows
             ]
 
+    def classify_import_description(
+        self, normalized_description: str
+    ) -> ImportClassification:
+        normalized = normalize_text(normalized_description)
+        with self.connect() as connection:
+            return self._classify_import_description(connection, normalized)
+
+    def add_import_item(
+        self,
+        import_job_id: int,
+        raw_description: str,
+        amount: Decimal,
+        expense_date: date,
+    ) -> ImportProcessingResult:
+        if not raw_description.strip():
+            raise ValueError("La descripcion importada es obligatoria.")
+        if not amount.is_finite() or amount <= 0:
+            raise ValueError("El importe debe ser mayor que cero.")
+        amount_cents = amount * 100
+        if amount_cents != amount_cents.to_integral_value():
+            raise ValueError("El importe no puede tener mas de dos decimales.")
+
+        normalized = normalize_text(raw_description)
+        with self.connect() as connection:
+            classification = self._classify_import_description(connection, normalized)
+            cursor = connection.execute(
+                """
+                INSERT INTO import_items (
+                    import_job_id, raw_description, user_description,
+                    normalized_description, amount, expense_date, category_id,
+                    subcategory_id, classification, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    import_job_id,
+                    raw_description,
+                    classification.user_description,
+                    normalized,
+                    int(amount_cents),
+                    expense_date.isoformat(),
+                    classification.category_id,
+                    classification.subcategory_id,
+                    classification.classification,
+                    classification.status,
+                ),
+            )
+            import_item_id = cursor.lastrowid
+            expense_id = None
+            if classification.create_expense:
+                expense_cursor = connection.execute(
+                    """
+                    INSERT INTO expenses (
+                        description, import_description, expense_date, amount,
+                        category_id, subcategory_id, source, import_job_id, import_item_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?)
+                    """,
+                    (
+                        classification.user_description,
+                        normalized,
+                        expense_date.isoformat(),
+                        int(amount_cents),
+                        classification.category_id,
+                        classification.subcategory_id,
+                        import_job_id,
+                        import_item_id,
+                    ),
+                )
+                expense_id = expense_cursor.lastrowid
+        return ImportProcessingResult(import_item_id, classification, expense_id)
+
+    def _classify_import_description(
+        self, connection: sqlite3.Connection, normalized: str
+    ) -> ImportClassification:
+        unknown = ImportClassification("unknown", "pending", None, None, None, False)
+        if not normalized:
+            return unknown
+
+        exact = connection.execute(
+            """
+            SELECT description, category_id, subcategory_id
+            FROM expenses
+            WHERE import_description = ?
+                AND category_id IS NOT NULL
+                AND subcategory_id IS NOT NULL
+            ORDER BY expense_date DESC, id DESC
+            LIMIT 1
+            """,
+            (normalized,),
+        ).fetchone()
+        if exact is not None:
+            return ImportClassification(
+                classification="identical",
+                status="accepted",
+                user_description=exact["description"],
+                category_id=exact["category_id"],
+                subcategory_id=exact["subcategory_id"],
+                create_expense=True,
+                similarity=100.0,
+            )
+
+        candidates = connection.execute(
+            """
+            SELECT import_description, description, category_id, subcategory_id
+            FROM expenses
+            WHERE import_description IS NOT NULL
+                AND length(trim(import_description)) > 0
+                AND category_id IS NOT NULL
+                AND subcategory_id IS NOT NULL
+            ORDER BY expense_date DESC, id DESC
+            """
+        ).fetchall()
+
+        candidate_descriptions = [
+            normalize_text(row["import_description"]) for row in candidates
+        ]
+        match = process.extractOne(
+            normalized,
+            candidate_descriptions,
+            scorer=fuzz.ratio,
+            score_cutoff=IMPORT_MATCH_THRESHOLD,
+        )
+        if match is None:
+            return unknown
+
+        matched_row = candidates[match[2]]
+        return ImportClassification(
+            classification="similar",
+            status="pending",
+            user_description=matched_row["description"],
+            category_id=matched_row["category_id"],
+            subcategory_id=matched_row["subcategory_id"],
+            create_expense=False,
+            similarity=match[1],
+        )
+
     @staticmethod
     def _migrate(connection: sqlite3.Connection) -> None:
         expense_columns = {
@@ -152,17 +304,35 @@ class SQLiteDatabase:
         }
         if "status" in expense_columns:
             connection.execute("ALTER TABLE expenses DROP COLUMN status")
+        if "import_job_id" not in expense_columns:
+            connection.execute(
+                "ALTER TABLE expenses ADD COLUMN import_job_id INTEGER "
+                "REFERENCES import_jobs(id) ON DELETE SET NULL"
+            )
+        if "import_item_id" not in expense_columns:
+            connection.execute(
+                "ALTER TABLE expenses ADD COLUMN import_item_id INTEGER "
+                "REFERENCES import_items(id) ON DELETE SET NULL"
+            )
 
-        import_items_schema = connection.execute(
+        import_items_row = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'import_items'"
-        ).fetchone()["sql"]
-        if "check (classification in" not in import_items_schema.lower():
+        ).fetchone()
+        import_items_schema = import_items_row["sql"]
+        import_item_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(import_items)")
+        }
+        has_user_description = "user_description" in import_item_columns
+        has_classification_check = "check (classification in" in import_items_schema.lower()
+        if not has_user_description or not has_classification_check:
+            user_description_source = "user_description" if has_user_description else "NULL"
             connection.execute(
                 """
                 CREATE TABLE import_items_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     import_job_id INTEGER NOT NULL REFERENCES import_jobs(id) ON DELETE CASCADE,
                     raw_description TEXT NOT NULL,
+                    user_description TEXT,
                     normalized_description TEXT,
                     amount INTEGER NOT NULL CHECK (amount > 0),
                     expense_date TEXT NOT NULL,
@@ -176,14 +346,15 @@ class SQLiteDatabase:
                 """
             )
             connection.execute(
-                """
+                f"""
                 INSERT INTO import_items_new (
-                    id, import_job_id, raw_description, normalized_description,
+                    id, import_job_id, raw_description, user_description, normalized_description,
                     amount, expense_date, category_id, subcategory_id,
                     classification, status
                 )
                 SELECT
-                    id, import_job_id, raw_description, normalized_description,
+                    id, import_job_id, raw_description, {user_description_source},
+                    normalized_description,
                     amount, expense_date, category_id, subcategory_id,
                     CASE WHEN classification IN ('identical', 'similar', 'unknown')
                         THEN classification ELSE 'unknown' END,
@@ -256,7 +427,8 @@ class SQLiteDatabase:
             rows = connection.execute(
                 "SELECT expenses.id, categories.name AS category, "
                 "subcategories.name AS subcategory, "
-                "expenses.description, expenses.amount, expenses.expense_date "
+                "expenses.description, expenses.amount, expenses.expense_date, "
+                "expenses.import_job_id, expenses.import_item_id "
                 "FROM expenses LEFT JOIN categories ON categories.id = expenses.category_id "
                 "LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id "
                 "ORDER BY expenses.expense_date DESC, expenses.id DESC"
@@ -269,6 +441,8 @@ class SQLiteDatabase:
                 amount=Decimal(row["amount"]) / 100,
                 spent_on=date.fromisoformat(row["expense_date"]),
                 subcategory=row["subcategory"],
+                import_job_id=row["import_job_id"],
+                import_item_id=row["import_item_id"],
             )
             for row in rows
         ]
@@ -414,7 +588,8 @@ class SQLiteDatabase:
             rows = connection.execute(
                 "SELECT expenses.id, COALESCE(categories.name, 'Sin categoria') AS category, "
                 "COALESCE(subcategories.name, 'Sin subcategoria') AS subcategory, "
-                "expenses.description, expenses.amount, expenses.expense_date "
+                "expenses.description, expenses.amount, expenses.expense_date, "
+                "expenses.import_job_id, expenses.import_item_id "
                 "FROM expenses "
                 "LEFT JOIN categories ON categories.id = expenses.category_id "
                 "LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id "
@@ -430,6 +605,8 @@ class SQLiteDatabase:
                 amount=Decimal(row["amount"]) / 100,
                 spent_on=date.fromisoformat(row["expense_date"]),
                 subcategory=row["subcategory"],
+                import_job_id=row["import_job_id"],
+                import_item_id=row["import_item_id"],
             )
             for row in rows
         ]

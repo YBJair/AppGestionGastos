@@ -31,7 +31,7 @@ def test_repository_persists_and_reads_expenses(tmp_path) -> None:
 
     with database.connect() as connection:
         row = connection.execute(
-            "SELECT amount, source, subcategory_id, expense_date "
+            "SELECT amount, source, subcategory_id, expense_date, import_job_id, import_item_id "
             "FROM expenses WHERE id = ?",
             (saved.id,),
         ).fetchone()
@@ -39,6 +39,8 @@ def test_repository_persists_and_reads_expenses(tmp_path) -> None:
     assert row["source"] == "manual"
     assert row["subcategory_id"] is not None
     assert row["expense_date"] == "2026-10-01"
+    assert row["import_job_id"] is None
+    assert row["import_item_id"] is None
 
 
 def test_list_expense_descriptions_returns_distinct_non_empty_values(tmp_path) -> None:
@@ -151,12 +153,15 @@ def test_initialize_creates_all_requested_tables(tmp_path) -> None:
             "subcategory_id",
             "source",
             "created_at",
+            "import_job_id",
+            "import_item_id",
         },
         "import_jobs": {"id", "source_type", "filename", "imported_at", "status"},
         "import_items": {
             "id",
             "import_job_id",
             "raw_description",
+               "user_description",
             "normalized_description",
             "amount",
             "expense_date",
@@ -231,6 +236,7 @@ def test_initialize_migrates_existing_schema(tmp_path) -> None:
             """,
             (job_id,),
         )
+        connection.execute("ALTER TABLE import_items DROP COLUMN user_description")
         connection.execute("ALTER TABLE expenses ADD COLUMN status TEXT DEFAULT 'confirmed'")
 
     database.initialize()
@@ -243,5 +249,166 @@ def test_initialize_migrates_existing_schema(tmp_path) -> None:
 
     assert "status" not in expense_columns
     assert item["raw_description"] == "Compra previa"
+    assert item["user_description"] is None
     assert item["classification"] == "unknown"
     assert item["status"] == "pending"
+
+
+def test_import_description_classification_prefers_newest_exact_match(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "import-classification.sqlite3")
+    database.initialize()
+    older = database.add(
+        Expense(
+            "Hogar", "Factura antigua", Decimal("45.00"), date(2026, 1, 1), subcategory="Luz"
+        )
+    )
+    newer = database.add(
+        Expense(
+            "Servicios",
+            "Factura eléctrica",
+            Decimal("50.00"),
+            date(2026, 2, 1),
+            subcategory="Electricidad",
+        )
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE expenses SET import_description = ? WHERE id IN (?, ?)",
+            ("cargo electricidad", older.id, newer.id),
+        )
+        newest_category = connection.execute(
+            "SELECT id FROM categories WHERE name = 'Servicios'"
+        ).fetchone()["id"]
+        newest_subcategory = connection.execute(
+            "SELECT id FROM subcategories WHERE name = 'Electricidad'"
+        ).fetchone()["id"]
+
+    result = database.classify_import_description("cargo electricidad")
+
+    assert result.classification == "identical"
+    assert result.status == "accepted"
+    assert result.user_description == "Factura eléctrica"
+    assert result.category_id == newest_category
+    assert result.subcategory_id == newest_subcategory
+    assert result.create_expense
+    assert result.similarity == 100
+
+
+def test_import_description_classification_returns_similar_and_unknown(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "import-similar.sqlite3")
+    database.initialize()
+    expense = database.add(
+        Expense(
+            "Supermercado",
+            "Compra semanal",
+            Decimal("70.00"),
+            date(2026, 3, 1),
+            subcategory="General",
+        )
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE expenses SET import_description = ? WHERE id = ?",
+            ("compra supermercado", expense.id),
+        )
+        category_id = connection.execute(
+            "SELECT id FROM categories WHERE name = 'Supermercado'"
+        ).fetchone()["id"]
+        subcategory_id = connection.execute(
+            "SELECT id FROM subcategories WHERE name = 'General'"
+        ).fetchone()["id"]
+
+    similar = database.classify_import_description("compra supermecado")
+    unknown = database.classify_import_description("pago completamente distinto")
+
+    assert similar.classification == "similar"
+    assert similar.status == "pending"
+    assert similar.user_description == "Compra semanal"
+    assert similar.category_id == category_id
+    assert similar.subcategory_id == subcategory_id
+    assert not similar.create_expense
+    assert similar.similarity is not None and similar.similarity >= 90
+    assert unknown.classification == "unknown"
+    assert unknown.status == "pending"
+    assert unknown.user_description is None
+    assert not unknown.create_expense
+
+
+def test_add_import_item_accepts_exact_and_leaves_other_matches_pending(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "process-import-items.sqlite3")
+    database.initialize()
+    previous_expense = database.add(
+        Expense(
+            "Servicios",
+            "Factura eléctrica",
+            Decimal("50.00"),
+            date(2026, 2, 1),
+            subcategory="Electricidad",
+        )
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE expenses SET import_description = ? WHERE id = ?",
+            ("cargo electricidad", previous_expense.id),
+        )
+        import_job_id = connection.execute(
+            "INSERT INTO import_jobs (source_type, filename) VALUES ('csv', 'extracto.csv')"
+        ).lastrowid
+
+    exact = database.add_import_item(
+        import_job_id, "CARGO electricidad", Decimal("51.25"), date(2026, 3, 1)
+    )
+    similar = database.add_import_item(
+        import_job_id, "cargo electricida", Decimal("7.50"), date(2026, 3, 2)
+    )
+    unknown = database.add_import_item(
+        import_job_id, "pago completamente desconocido", Decimal("3.00"), date(2026, 3, 3)
+    )
+
+    with database.connect() as connection:
+        exact_item = connection.execute(
+            "SELECT * FROM import_items WHERE id = ?", (exact.import_item_id,)
+        ).fetchone()
+        exact_expense = connection.execute(
+            "SELECT * FROM expenses WHERE id = ?", (exact.expense_id,)
+        ).fetchone()
+        similar_item = connection.execute(
+            "SELECT * FROM import_items WHERE id = ?", (similar.import_item_id,)
+        ).fetchone()
+        unknown_item = connection.execute(
+            "SELECT * FROM import_items WHERE id = ?", (unknown.import_item_id,)
+        ).fetchone()
+        imported_expense_count = connection.execute(
+            "SELECT COUNT(*) FROM expenses WHERE source = 'import'"
+        ).fetchone()[0]
+
+    assert exact.classification.classification == "identical"
+    assert exact.classification.status == "accepted"
+    assert exact.expense_id is not None
+    assert exact_item["raw_description"] == "CARGO electricidad"
+    assert exact_item["normalized_description"] == "cargo electricidad"
+    assert exact_item["user_description"] == "Factura eléctrica"
+    assert exact_item["classification"] == "identical"
+    assert exact_item["status"] == "accepted"
+    assert exact_expense["description"] == "Factura eléctrica"
+    assert exact_expense["import_description"] == "cargo electricidad"
+    assert exact_expense["expense_date"] == "2026-03-01"
+    assert exact_expense["amount"] == 5125
+    assert exact_expense["category_id"] == exact_item["category_id"]
+    assert exact_expense["subcategory_id"] == exact_item["subcategory_id"]
+    assert exact_expense["source"] == "import"
+    assert exact_expense["import_job_id"] == import_job_id
+    assert exact_expense["import_item_id"] == exact.import_item_id
+
+    assert similar.classification.classification == "similar"
+    assert similar.expense_id is None
+    assert similar_item["user_description"] == "Factura eléctrica"
+    assert similar_item["category_id"] == exact_item["category_id"]
+    assert similar_item["subcategory_id"] == exact_item["subcategory_id"]
+    assert similar_item["status"] == "pending"
+    assert unknown.classification.classification == "unknown"
+    assert unknown_item["user_description"] is None
+    assert unknown_item["category_id"] is None
+    assert unknown_item["subcategory_id"] is None
+    assert unknown_item["status"] == "pending"
+    assert imported_expense_count == 1

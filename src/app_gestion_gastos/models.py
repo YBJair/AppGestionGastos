@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +12,8 @@ class Expense:
     spent_on: date
     id: int | None = None
     subcategory: str | None = None
+    import_job_id: int | None = None
+    import_item_id: int | None = None
 
     def __post_init__(self) -> None:
         if not self.category.strip():
@@ -46,3 +49,21 @@ class ExpenseSuggestion:
     description: str
     category: str | None
     subcategory: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ImportClassification:
+    classification: Literal["identical", "similar", "unknown"]
+    status: Literal["pending", "accepted"]
+    user_description: str | None
+    category_id: int | None
+    subcategory_id: int | None
+    create_expense: bool
+    similarity: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ImportProcessingResult:
+    import_item_id: int
+    classification: ImportClassification
+    expense_id: int | None

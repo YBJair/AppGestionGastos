@@ -14,7 +14,9 @@ from app_gestion_gastos.models import (
     ExpenseBreakdown,
     ExpenseSuggestion,
     ImportClassification,
+    ImportJobSummary,
     ImportProcessingResult,
+    PendingImportItemSummary,
 )
 from app_gestion_gastos.text_utils import normalize_text
 
@@ -119,6 +121,55 @@ class SQLiteDatabase:
         with self.connect() as connection:
             rows = connection.execute("SELECT name FROM categories ORDER BY name COLLATE NOCASE")
             return [row["name"] for row in rows]
+
+    def list_import_jobs(self) -> list[ImportJobSummary]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT filename, source_type, imported_at, status "
+                "FROM import_jobs ORDER BY imported_at DESC, id DESC"
+            )
+            return [
+                ImportJobSummary(
+                    filename=row["filename"],
+                    source_type=row["source_type"],
+                    imported_at=row["imported_at"],
+                    status=row["status"],
+                )
+                for row in rows
+            ]
+
+    def list_pending_import_items(
+        self, classification: Literal["similar", "unknown"]
+    ) -> list[PendingImportItemSummary]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    import_items.raw_description,
+                    import_items.user_description,
+                    import_items.amount,
+                    categories.name AS category,
+                    subcategories.name AS subcategory,
+                    import_items.expense_date
+                FROM import_items
+                LEFT JOIN categories ON categories.id = import_items.category_id
+                LEFT JOIN subcategories ON subcategories.id = import_items.subcategory_id
+                WHERE import_items.classification = ? AND import_items.status = 'pending'
+                ORDER BY import_items.id DESC
+                """,
+                (classification,),
+            )
+            return [
+                PendingImportItemSummary(
+                    raw_description=row["raw_description"],
+                    user_description=row["user_description"],
+                    amount=Decimal(row["amount"]) / 100,
+                    category=row["category"],
+                    subcategory=row["subcategory"],
+                    expense_date=date.fromisoformat(row["expense_date"]),
+                )
+                for row in rows
+            ]
 
     def list_subcategories(self, category: str) -> list[str]:
         if not category.strip():

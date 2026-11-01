@@ -31,11 +31,14 @@ def test_breakdown_view_groups_month_category_and_subcategory(tmp_path) -> None:
         )
     )
     window = MainWindow(ExpenseService(database))
-    assert window.tabs.count() == 4
+    assert window.tabs.count() == 7
     assert window.tabs.tabText(0) == "Gráfico"
     assert window.tabs.tabText(1) == "Desglose"
     assert window.tabs.tabText(2) == "Gastos"
     assert window.tabs.tabText(3) == "Nuevo gasto"
+    assert window.tabs.tabText(4) == "Importaciones"
+    assert window.tabs.tabText(5) == "Similares"
+    assert window.tabs.tabText(6) == "Nuevas"
     assert window.tabs.currentWidget() is window.chart_view
     window.tabs.setCurrentIndex(1)
     view = window.breakdown_view

@@ -24,6 +24,7 @@ from rapidfuzz import fuzz, process
 
 from app_gestion_gastos.breakdown_view import ExpenseBreakdownView
 from app_gestion_gastos.chart_view import ExpenseChartView
+from app_gestion_gastos.import_views import ImportJobsView, PendingImportItemsView
 from app_gestion_gastos.services import ExpenseService
 from app_gestion_gastos.text_utils import normalize_text
 
@@ -308,6 +309,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(container, "Gastos")
         self.expense_view = ExpenseEntryView(service)
         self.tabs.addTab(self.expense_view, "Nuevo gasto")
+        self.import_jobs_view = ImportJobsView(service)
+        self.tabs.addTab(self.import_jobs_view, "Importaciones")
+        self.similar_import_items_view = PendingImportItemsView(service, "similar")
+        self.tabs.addTab(self.similar_import_items_view, "Similares")
+        self.new_import_items_view = PendingImportItemsView(service, "unknown")
+        self.tabs.addTab(self.new_import_items_view, "Nuevas")
         self.expense_view.expense_saved.connect(self.refresh)
         self.tabs.setCurrentWidget(self.chart_view)
         self.tabs.currentChanged.connect(self._main_tab_changed)
@@ -332,6 +339,9 @@ class MainWindow(QMainWindow):
                     item.setTextAlignment(alignment)
                 self.table.setItem(row_index, column_index, item)
         self.chart_view.refresh()
+        self.import_jobs_view.refresh()
+        self.similar_import_items_view.refresh()
+        self.new_import_items_view.refresh()
 
     def _main_tab_changed(self, index: int) -> None:
         if self.tabs.widget(index) is self.chart_view:

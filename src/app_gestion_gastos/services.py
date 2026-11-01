@@ -8,7 +8,9 @@ from app_gestion_gastos.models import (
     ExpenseBreakdown,
     ExpenseSuggestion,
     ImportClassification,
+    ImportJobSummary,
     ImportProcessingResult,
+    PendingImportItemSummary,
 )
 
 
@@ -36,6 +38,12 @@ class ExpenseRepository(Protocol):
         amount: Decimal,
         expense_date: date,
     ) -> ImportProcessingResult: ...
+
+    def list_import_jobs(self) -> list[ImportJobSummary]: ...
+
+    def list_pending_import_items(
+        self, classification: Literal["similar", "unknown"]
+    ) -> list[PendingImportItemSummary]: ...
 
     def get_expenses_for_month(self, year: int, month: int) -> list[Expense]: ...
 
@@ -123,6 +131,14 @@ class ExpenseService:
         return self._repository.add_import_item(
             import_job_id, raw_description, amount, expense_date
         )
+
+    def list_import_jobs(self) -> list[ImportJobSummary]:
+        return self._repository.list_import_jobs()
+
+    def list_pending_import_items(
+        self, classification: Literal["similar", "unknown"]
+    ) -> list[PendingImportItemSummary]:
+        return self._repository.list_pending_import_items(classification)
 
     def get_expenses_for_month(self, year: int, month: int) -> list[Expense]:
         return self._repository.get_expenses_for_month(year, month)

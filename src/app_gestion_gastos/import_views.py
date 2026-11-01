@@ -1,5 +1,10 @@
+import sqlite3
+
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -7,19 +12,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_gestion_gastos.csv_importer import CsvImportError
 from app_gestion_gastos.services import ExpenseService
 
 
 class ImportJobsView(QWidget):
+    import_completed = Signal()
+
     def __init__(self, service: ExpenseService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._service = service
 
         self.import_csv_button = QPushButton("Importar CSV")
         self.import_pdf_button = QPushButton("Importar PDF")
-        for button in (self.import_csv_button, self.import_pdf_button):
-            button.setEnabled(False)
-            button.setToolTip("Disponible en una próxima etapa")
+        self.import_csv_button.clicked.connect(self._select_csv_file)
+        self.import_pdf_button.setEnabled(False)
+        self.import_pdf_button.setToolTip("Disponible en una próxima etapa")
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.import_csv_button)
@@ -49,6 +57,27 @@ class ImportJobsView(QWidget):
             )
             for column_index, value in enumerate(values):
                 self.table.setItem(row_index, column_index, QTableWidgetItem(value))
+
+    def _select_csv_file(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Importar gastos desde CSV",
+            "",
+            "Archivos CSV (*.csv)",
+        )
+        if not filename:
+            return
+        try:
+            _, imported_count = self._service.import_csv_file(filename)
+        except (CsvImportError, ValueError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "No se pudo importar el CSV", str(error))
+            return
+        self.import_completed.emit()
+        QMessageBox.information(
+            self,
+            "Importación completada",
+            f"Se importaron {imported_count} gastos.",
+        )
 
 
 class PendingImportItemsView(QWidget):

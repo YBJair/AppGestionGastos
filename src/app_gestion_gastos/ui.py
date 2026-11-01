@@ -316,6 +316,7 @@ class MainWindow(QMainWindow):
         self.new_import_items_view = PendingImportItemsView(service, "unknown")
         self.tabs.addTab(self.new_import_items_view, "Nuevas")
         self.expense_view.expense_saved.connect(self.refresh)
+        self.import_jobs_view.import_completed.connect(self.refresh)
         self.tabs.setCurrentWidget(self.chart_view)
         self.tabs.currentChanged.connect(self._main_tab_changed)
         self.setCentralWidget(self.tabs)

@@ -85,3 +85,13 @@ class PendingImportItemSummary:
     category: str | None
     subcategory: str | None
     expense_date: date
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedCsvExpense:
+    expense_date: date
+    category: str
+    subcategory: str
+    amount_cents: int
+    note: str
+    normalized_note: str

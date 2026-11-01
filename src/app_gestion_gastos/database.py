@@ -16,6 +16,7 @@ from app_gestion_gastos.models import (
     ImportClassification,
     ImportJobSummary,
     ImportProcessingResult,
+    ParsedCsvExpense,
     PendingImportItemSummary,
 )
 from app_gestion_gastos.text_utils import normalize_text
@@ -66,7 +67,7 @@ SCHEMA = (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         import_job_id INTEGER NOT NULL REFERENCES import_jobs(id) ON DELETE CASCADE,
         raw_description TEXT NOT NULL,
-            user_description TEXT,
+        user_description TEXT,
         normalized_description TEXT,
         amount INTEGER NOT NULL CHECK (amount > 0),
         expense_date TEXT NOT NULL,
@@ -282,6 +283,91 @@ class SQLiteDatabase:
                 )
                 expense_id = expense_cursor.lastrowid
         return ImportProcessingResult(import_item_id, classification, expense_id)
+
+    def import_csv_expenses(
+        self, filename: str, rows: list[ParsedCsvExpense]
+    ) -> tuple[int, int]:
+        with self.connect() as connection:
+            job_cursor = connection.execute(
+                """
+                INSERT INTO import_jobs (source_type, filename, status)
+                VALUES ('CSV', ?, 'completed')
+                """,
+                (Path(filename).name,),
+            )
+            import_job_id = job_cursor.lastrowid
+            categories = {
+                row["name"].strip().casefold(): (row["id"], row["name"])
+                for row in connection.execute("SELECT id, name FROM categories")
+            }
+            subcategories = {
+                (row["category_id"], row["name"].strip().casefold()): (
+                    row["id"],
+                    row["name"],
+                )
+                for row in connection.execute("SELECT id, category_id, name FROM subcategories")
+            }
+
+            for row in rows:
+                category_key = row.category.casefold()
+                category = categories.get(category_key)
+                if category is None:
+                    category_id = connection.execute(
+                        "INSERT INTO categories (name) VALUES (?)", (row.category,)
+                    ).lastrowid
+                    categories[category_key] = (category_id, row.category)
+                else:
+                    category_id = category[0]
+
+                subcategory_key = (category_id, row.subcategory.casefold())
+                subcategory = subcategories.get(subcategory_key)
+                if subcategory is None:
+                    subcategory_id = connection.execute(
+                        "INSERT INTO subcategories (category_id, name) VALUES (?, ?)",
+                        (category_id, row.subcategory),
+                    ).lastrowid
+                    subcategories[subcategory_key] = (subcategory_id, row.subcategory)
+                else:
+                    subcategory_id = subcategory[0]
+
+                item_id = connection.execute(
+                    """
+                    INSERT INTO import_items (
+                        import_job_id, raw_description, user_description,
+                        normalized_description, amount, expense_date, category_id,
+                        subcategory_id, classification, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'identical', 'accepted')
+                    """,
+                    (
+                        import_job_id,
+                        row.note,
+                        row.note,
+                        row.normalized_note,
+                        row.amount_cents,
+                        row.expense_date.isoformat(),
+                        category_id,
+                        subcategory_id,
+                    ),
+                ).lastrowid
+                connection.execute(
+                    """
+                    INSERT INTO expenses (
+                        description, import_description, expense_date, amount,
+                        category_id, subcategory_id, source, import_job_id, import_item_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?)
+                    """,
+                    (
+                        row.note,
+                        row.normalized_note,
+                        row.expense_date.isoformat(),
+                        row.amount_cents,
+                        category_id,
+                        subcategory_id,
+                        import_job_id,
+                        item_id,
+                    ),
+                )
+        return import_job_id, len(rows)
 
     def _classify_import_description(
         self, connection: sqlite3.Connection, normalized: str

@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal, Protocol
 
+from app_gestion_gastos.csv_importer import parse_expense_csv
 from app_gestion_gastos.models import (
     ChartData,
     Expense,
@@ -10,6 +11,7 @@ from app_gestion_gastos.models import (
     ImportClassification,
     ImportJobSummary,
     ImportProcessingResult,
+    ParsedCsvExpense,
     PendingImportItemSummary,
 )
 
@@ -38,6 +40,10 @@ class ExpenseRepository(Protocol):
         amount: Decimal,
         expense_date: date,
     ) -> ImportProcessingResult: ...
+
+    def import_csv_expenses(
+        self, filename: str, rows: list[ParsedCsvExpense]
+    ) -> tuple[int, int]: ...
 
     def list_import_jobs(self) -> list[ImportJobSummary]: ...
 
@@ -131,6 +137,10 @@ class ExpenseService:
         return self._repository.add_import_item(
             import_job_id, raw_description, amount, expense_date
         )
+
+    def import_csv_file(self, filename: str) -> tuple[int, int]:
+        rows = parse_expense_csv(filename)
+        return self._repository.import_csv_expenses(filename, rows)
 
     def list_import_jobs(self) -> list[ImportJobSummary]:
         return self._repository.list_import_jobs()

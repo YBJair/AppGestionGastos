@@ -1,3 +1,5 @@
+# IA Slop, no os molestéis
+
 # Gestion de gastos
 
 Aplicacion de escritorio AppGestionGastos, construida con PySide6 y SQLite.

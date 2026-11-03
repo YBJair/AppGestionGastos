@@ -95,3 +95,10 @@ class ParsedCsvExpense:
     amount_cents: int
     note: str
     normalized_note: str
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedPdfTransaction:
+    expense_date: date
+    description: str
+    amount_cents: int

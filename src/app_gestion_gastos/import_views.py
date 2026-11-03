@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app_gestion_gastos.csv_importer import CsvImportError
+from app_gestion_gastos.pdf_importer import PdfImportError
 from app_gestion_gastos.services import ExpenseService
 
 
@@ -26,8 +27,7 @@ class ImportJobsView(QWidget):
         self.import_csv_button = QPushButton("Importar CSV")
         self.import_pdf_button = QPushButton("Importar PDF")
         self.import_csv_button.clicked.connect(self._select_csv_file)
-        self.import_pdf_button.setEnabled(False)
-        self.import_pdf_button.setToolTip("Disponible en una próxima etapa")
+        self.import_pdf_button.clicked.connect(self._select_pdf_file)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.import_csv_button)
@@ -77,6 +77,27 @@ class ImportJobsView(QWidget):
             self,
             "Importación completada",
             f"Se importaron {imported_count} gastos.",
+        )
+
+    def _select_pdf_file(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Importar movimientos desde PDF",
+            "",
+            "Archivos PDF (*.pdf)",
+        )
+        if not filename:
+            return
+        try:
+            _, imported_count = self._service.import_pdf_file(filename)
+        except (PdfImportError, ValueError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "No se pudo importar el PDF", str(error))
+            return
+        self.import_completed.emit()
+        QMessageBox.information(
+            self,
+            "Importación completada",
+            f"Se procesaron {imported_count} salidas de dinero.",
         )
 
 

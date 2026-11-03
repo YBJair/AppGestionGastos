@@ -12,6 +12,7 @@ from app_gestion_gastos.models import (
     ImportJobSummary,
     ImportProcessingResult,
     ParsedCsvExpense,
+    ParsedPdfTransaction,
     PendingImportItemSummary,
 )
 
@@ -44,6 +45,12 @@ class ExpenseRepository(Protocol):
     def import_csv_expenses(
         self, filename: str, rows: list[ParsedCsvExpense]
     ) -> tuple[int, int]: ...
+
+    def import_pdf_expenses(
+        self, filename: str, rows: list[ParsedPdfTransaction]
+    ) -> tuple[int, int]: ...
+
+    def accept_import_item(self, import_item_id: int) -> None: ...
 
     def list_import_jobs(self) -> list[ImportJobSummary]: ...
 
@@ -140,7 +147,18 @@ class ExpenseService:
 
     def import_csv_file(self, filename: str) -> tuple[int, int]:
         rows = parse_expense_csv(filename)
+        if not rows:
+            raise ValueError("El CSV no contiene filas de gastos.")
         return self._repository.import_csv_expenses(filename, rows)
+
+    def import_pdf_file(self, filename: str) -> tuple[int, int]:
+        from app_gestion_gastos.pdf_importer import parse_bank_statement_pdf
+
+        rows = parse_bank_statement_pdf(filename)
+        return self._repository.import_pdf_expenses(filename, rows)
+
+    def accept_import_item(self, import_item_id: int) -> None:
+        self._repository.accept_import_item(import_item_id)
 
     def list_import_jobs(self) -> list[ImportJobSummary]:
         return self._repository.list_import_jobs()

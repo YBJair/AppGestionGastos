@@ -72,7 +72,7 @@ def test_import_queries_sort_jobs_and_filter_pending_items(tmp_path) -> None:
     assert [item.raw_description for item in unknown_items] == ["Cargo nuevo"]
 
 
-def test_import_views_show_requested_columns_and_placeholder_buttons(tmp_path) -> None:
+def test_import_views_show_requested_columns_and_enabled_import_buttons(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     database = SQLiteDatabase(tmp_path / "import-view-columns.sqlite3")
     database.initialize()
@@ -86,7 +86,7 @@ def test_import_views_show_requested_columns_and_placeholder_buttons(tmp_path) -
         "Estado",
     ]
     assert jobs_view.import_csv_button.isEnabled()
-    assert not jobs_view.import_pdf_button.isEnabled()
+    assert jobs_view.import_pdf_button.isEnabled()
 
     similar_view = PendingImportItemsView(ExpenseService(database), "similar")
     new_view = PendingImportItemsView(ExpenseService(database), "unknown")

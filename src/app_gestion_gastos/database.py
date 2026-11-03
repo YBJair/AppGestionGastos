@@ -17,6 +17,7 @@ from app_gestion_gastos.models import (
     ImportJobSummary,
     ImportProcessingResult,
     ParsedCsvExpense,
+    ParsedPdfTransaction,
     PendingImportItemSummary,
 )
 from app_gestion_gastos.text_utils import normalize_text
@@ -236,53 +237,17 @@ class SQLiteDatabase:
         if amount_cents != amount_cents.to_integral_value():
             raise ValueError("El importe no puede tener mas de dos decimales.")
 
-        normalized = normalize_text(raw_description)
         with self.connect() as connection:
-            classification = self._classify_import_description(connection, normalized)
-            cursor = connection.execute(
-                """
-                INSERT INTO import_items (
-                    import_job_id, raw_description, user_description,
-                    normalized_description, amount, expense_date, category_id,
-                    subcategory_id, classification, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    import_job_id,
-                    raw_description,
-                    classification.user_description,
-                    normalized,
-                    int(amount_cents),
-                    expense_date.isoformat(),
-                    classification.category_id,
-                    classification.subcategory_id,
-                    classification.classification,
-                    classification.status,
-                ),
+            result = self._insert_classified_import_item(
+                connection,
+                import_job_id,
+                raw_description,
+                normalize_text(raw_description),
+                int(amount_cents),
+                expense_date,
             )
-            import_item_id = cursor.lastrowid
-            expense_id = None
-            if classification.create_expense:
-                expense_cursor = connection.execute(
-                    """
-                    INSERT INTO expenses (
-                        description, import_description, expense_date, amount,
-                        category_id, subcategory_id, source, import_job_id, import_item_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?)
-                    """,
-                    (
-                        classification.user_description,
-                        normalized,
-                        expense_date.isoformat(),
-                        int(amount_cents),
-                        classification.category_id,
-                        classification.subcategory_id,
-                        import_job_id,
-                        import_item_id,
-                    ),
-                )
-                expense_id = expense_cursor.lastrowid
-        return ImportProcessingResult(import_item_id, classification, expense_id)
+            self._refresh_import_job_status(connection, import_job_id)
+        return result
 
     def import_csv_expenses(
         self, filename: str, rows: list[ParsedCsvExpense]
@@ -290,8 +255,8 @@ class SQLiteDatabase:
         with self.connect() as connection:
             job_cursor = connection.execute(
                 """
-                INSERT INTO import_jobs (source_type, filename, status)
-                VALUES ('CSV', ?, 'completed')
+                    INSERT INTO import_jobs (source_type, filename, status)
+                    VALUES ('CSV', ?, 'pending')
                 """,
                 (Path(filename).name,),
             )
@@ -367,7 +332,149 @@ class SQLiteDatabase:
                         item_id,
                     ),
                 )
+            self._refresh_import_job_status(connection, import_job_id)
         return import_job_id, len(rows)
+
+    def import_pdf_expenses(
+        self, filename: str, rows: list[ParsedPdfTransaction]
+    ) -> tuple[int, int]:
+        if not rows:
+            raise ValueError("El PDF no contiene salidas de dinero para importar.")
+        with self.connect() as connection:
+            job_id = connection.execute(
+                """
+                INSERT INTO import_jobs (source_type, filename, status)
+                VALUES ('PDF', ?, 'pending')
+                """,
+                (Path(filename).name,),
+            ).lastrowid
+            for row in rows:
+                self._insert_classified_import_item(
+                    connection,
+                    job_id,
+                    row.description,
+                    normalize_text(row.description),
+                    row.amount_cents,
+                    row.expense_date,
+                )
+            self._refresh_import_job_status(connection, job_id)
+        return job_id, len(rows)
+
+    def accept_import_item(self, import_item_id: int) -> None:
+        with self.connect() as connection:
+            item = connection.execute(
+                "SELECT * FROM import_items WHERE id = ?", (import_item_id,)
+            ).fetchone()
+            if item is None:
+                raise ValueError("No existe la línea de importación.")
+            if item["status"] != "accepted":
+                if (
+                    not item["user_description"]
+                    or not item["category_id"]
+                    or not item["subcategory_id"]
+                ):
+                    raise ValueError("Completa alias, categoría y subcategoría antes de aceptar.")
+                existing_expense = connection.execute(
+                    "SELECT id FROM expenses WHERE import_item_id = ? LIMIT 1",
+                    (import_item_id,),
+                ).fetchone()
+                if existing_expense is None:
+                    connection.execute(
+                        """
+                        INSERT INTO expenses (
+                            description, import_description, expense_date, amount,
+                            category_id, subcategory_id, source, import_job_id, import_item_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?)
+                        """,
+                        (
+                            item["user_description"],
+                            item["normalized_description"],
+                            item["expense_date"],
+                            item["amount"],
+                            item["category_id"],
+                            item["subcategory_id"],
+                            item["import_job_id"],
+                            import_item_id,
+                        ),
+                    )
+            connection.execute(
+                "UPDATE import_items SET status = 'accepted' WHERE id = ?",
+                (import_item_id,),
+            )
+            self._refresh_import_job_status(connection, item["import_job_id"])
+
+    def _insert_classified_import_item(
+        self,
+        connection: sqlite3.Connection,
+        import_job_id: int,
+        raw_description: str,
+        normalized_description: str,
+        amount_cents: int,
+        expense_date: date,
+    ) -> ImportProcessingResult:
+        classification = self._classify_import_description(connection, normalized_description)
+        item_id = connection.execute(
+            """
+            INSERT INTO import_items (
+                import_job_id, raw_description, user_description,
+                normalized_description, amount, expense_date, category_id,
+                subcategory_id, classification, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                import_job_id,
+                raw_description,
+                classification.user_description,
+                normalized_description,
+                amount_cents,
+                expense_date.isoformat(),
+                classification.category_id,
+                classification.subcategory_id,
+                classification.classification,
+                classification.status,
+            ),
+        ).lastrowid
+        expense_id = None
+        if classification.create_expense:
+            expense_id = connection.execute(
+                """
+                INSERT INTO expenses (
+                    description, import_description, expense_date, amount,
+                    category_id, subcategory_id, source, import_job_id, import_item_id
+                ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?)
+                """,
+                (
+                    classification.user_description,
+                    normalized_description,
+                    expense_date.isoformat(),
+                    amount_cents,
+                    classification.category_id,
+                    classification.subcategory_id,
+                    import_job_id,
+                    item_id,
+                ),
+            ).lastrowid
+        return ImportProcessingResult(item_id, classification, expense_id)
+
+    @staticmethod
+    def _refresh_import_job_status(connection: sqlite3.Connection, import_job_id: int) -> None:
+        counts = connection.execute(
+            """
+            SELECT COUNT(*) AS total,
+                SUM(CASE WHEN status = 'accepted' THEN 0 ELSE 1 END) AS awaiting_acceptance
+            FROM import_items
+            WHERE import_job_id = ?
+            """,
+            (import_job_id,),
+        ).fetchone()
+        status = (
+            "completed"
+            if counts["total"] > 0 and counts["awaiting_acceptance"] == 0
+            else "pending"
+        )
+        connection.execute(
+            "UPDATE import_jobs SET status = ? WHERE id = ?", (status, import_job_id)
+        )
 
     def _classify_import_description(
         self, connection: sqlite3.Connection, normalized: str

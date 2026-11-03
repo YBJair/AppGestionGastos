@@ -1,8 +1,9 @@
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import QDate, QEvent, QObject, QStringListModel, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QCompleter,
     QDateEdit,
@@ -25,6 +26,7 @@ from rapidfuzz import fuzz, process
 from app_gestion_gastos.breakdown_view import ExpenseBreakdownView
 from app_gestion_gastos.chart_view import ExpenseChartView
 from app_gestion_gastos.import_views import ImportJobsView, PendingImportItemsView
+from app_gestion_gastos.models import Expense
 from app_gestion_gastos.services import ExpenseService
 from app_gestion_gastos.text_utils import normalize_text
 
@@ -289,15 +291,27 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AppGestionGastos")
         self.resize(820, 480)
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
-            ["Fecha", "Descripcion", "Importe", "Categoria", "Subcategoria"]
+            ["Fecha", "Descripcion", "Importe", "Categoria", "Subcategoria", "Seleccionar"]
         )
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self._loading_table = False
+        self.table.itemChanged.connect(self._expense_cell_changed)
+
+        self.apply_changes_button = QPushButton("Aplicar")
+        self.apply_changes_button.clicked.connect(self._apply_selected_changes)
+        self.delete_expenses_button = QPushButton("Borrar")
+        self.delete_expenses_button.clicked.connect(self._delete_selected_expenses)
+        expense_actions = QHBoxLayout()
+        expense_actions.addStretch()
+        expense_actions.addWidget(self.apply_changes_button)
+        expense_actions.addWidget(self.delete_expenses_button)
 
         layout = QVBoxLayout()
+        layout.addLayout(expense_actions)
         layout.addWidget(self.table)
         container = QWidget()
         container.setLayout(layout)
@@ -324,6 +338,7 @@ class MainWindow(QMainWindow):
 
     def refresh(self) -> None:
         expenses = self._service.list_expenses()
+        self._loading_table = True
         self.table.setRowCount(len(expenses))
         for row_index, expense in enumerate(expenses):
             values = (
@@ -339,10 +354,100 @@ class MainWindow(QMainWindow):
                     alignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     item.setTextAlignment(alignment)
                 self.table.setItem(row_index, column_index, item)
+            checked_item = QTableWidgetItem()
+            checked_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            checked_item.setCheckState(Qt.CheckState.Unchecked)
+            checked_item.setData(Qt.ItemDataRole.UserRole, expense.id)
+            self.table.setItem(row_index, 5, checked_item)
+        self._loading_table = False
         self.chart_view.refresh()
         self.import_jobs_view.refresh()
         self.similar_import_items_view.refresh()
         self.new_import_items_view.refresh()
+
+    def _expense_cell_changed(self, item: QTableWidgetItem) -> None:
+        if self._loading_table or item.column() == 5:
+            return
+        checked_item = self.table.item(item.row(), 5)
+        if checked_item.checkState() != Qt.CheckState.Checked:
+            self.table.blockSignals(True)
+            checked_item.setCheckState(Qt.CheckState.Checked)
+            self.table.blockSignals(False)
+
+    def _selected_expense_rows(self) -> list[int]:
+        return [
+            row
+            for row in range(self.table.rowCount())
+            if self.table.item(row, 5).checkState() == Qt.CheckState.Checked
+        ]
+
+    def _delete_selected_expenses(self) -> None:
+        rows = self._selected_expense_rows()
+        if not rows:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Confirmar borrado",
+            f"¿Estás seguro de querer borrar {len(rows)} líneas?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        expense_ids = [
+            self.table.item(row, 5).data(Qt.ItemDataRole.UserRole) for row in rows
+        ]
+        self._service.delete_expenses(expense_ids)
+        self.refresh()
+
+    def _apply_selected_changes(self) -> None:
+        rows = self._selected_expense_rows()
+        if not rows:
+            return
+        try:
+            expenses = [self._expense_from_row(row) for row in rows]
+        except (ValueError, InvalidOperation) as error:
+            QMessageBox.warning(self, "Datos no válidos", str(error))
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Confirmar cambios",
+            f"¿Estás seguro de querer aplicar los cambios de {len(rows)} líneas?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._service.update_expenses(expenses)
+        except ValueError as error:
+            QMessageBox.warning(self, "No se pudieron aplicar los cambios", str(error))
+            return
+        self.refresh()
+
+    def _expense_from_row(self, row: int) -> Expense:
+        expense_id = self.table.item(row, 5).data(Qt.ItemDataRole.UserRole)
+        date_text = self.table.item(row, 0).text().strip()
+        description = self.table.item(row, 1).text().strip()
+        amount_text = (
+            self.table.item(row, 2).text().strip().replace("€", "").replace(" ", "")
+        )
+        if "," in amount_text:
+            amount_text = amount_text.replace(".", "").replace(",", ".")
+        amount = Decimal(amount_text)
+        return Expense(
+            category=self.table.item(row, 3).text().strip(),
+            description=description,
+            amount=amount,
+            spent_on=date.fromisoformat(date_text),
+            id=expense_id,
+            subcategory=self.table.item(row, 4).text().strip(),
+        )
 
     def _main_tab_changed(self, index: int) -> None:
         if self.tabs.widget(index) is self.chart_view:

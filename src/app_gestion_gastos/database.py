@@ -666,6 +666,75 @@ class SQLiteDatabase:
             subcategory=expense.subcategory,
         )
 
+    def update_expenses(self, expenses: list[Expense]) -> None:
+        if not expenses:
+            return
+        with self.connect() as connection:
+            for expense in expenses:
+                if expense.id is None:
+                    raise ValueError("No se puede actualizar un gasto sin identificador.")
+                if not expense.subcategory or not expense.subcategory.strip():
+                    raise ValueError("La subcategoria es obligatoria.")
+                amount_cents = expense.amount * 100
+                if amount_cents != amount_cents.to_integral_value():
+                    raise ValueError("El importe no puede tener mas de dos decimales.")
+
+                category_row = connection.execute(
+                    "SELECT id FROM categories WHERE name = ? COLLATE NOCASE",
+                    (expense.category.strip(),),
+                ).fetchone()
+                category_id = (
+                    category_row["id"]
+                    if category_row
+                    else connection.execute(
+                        "INSERT INTO categories (name) VALUES (?)",
+                        (expense.category.strip(),),
+                    ).lastrowid
+                )
+                subcategory_row = connection.execute(
+                    """
+                    SELECT id FROM subcategories
+                    WHERE category_id = ? AND name = ? COLLATE NOCASE
+                    """,
+                    (category_id, expense.subcategory.strip()),
+                ).fetchone()
+                subcategory_id = (
+                    subcategory_row["id"]
+                    if subcategory_row
+                    else connection.execute(
+                        "INSERT INTO subcategories (category_id, name) VALUES (?, ?)",
+                        (category_id, expense.subcategory.strip()),
+                    ).lastrowid
+                )
+                cursor = connection.execute(
+                    """
+                    UPDATE expenses
+                    SET description = ?, expense_date = ?, amount = ?,
+                        category_id = ?, subcategory_id = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        expense.description.strip(),
+                        expense.spent_on.isoformat(),
+                        int(amount_cents),
+                        category_id,
+                        subcategory_id,
+                        expense.id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError(f"No existe el gasto {expense.id}.")
+
+    def delete_expenses(self, expense_ids: list[int]) -> None:
+        unique_ids = list(dict.fromkeys(expense_ids))
+        if not unique_ids:
+            return
+        placeholders = ", ".join("?" for _ in unique_ids)
+        with self.connect() as connection:
+            connection.execute(
+                f"DELETE FROM expenses WHERE id IN ({placeholders})", unique_ids
+            )
+
     def list_all(self) -> list[Expense]:
         with self.connect() as connection:
             rows = connection.execute(

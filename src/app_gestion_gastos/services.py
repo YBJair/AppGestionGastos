@@ -20,6 +20,10 @@ from app_gestion_gastos.models import (
 class ExpenseRepository(Protocol):
     def add(self, expense: Expense) -> Expense: ...
 
+    def update_expenses(self, expenses: list[Expense]) -> None: ...
+
+    def delete_expenses(self, expense_ids: list[int]) -> None: ...
+
     def list_all(self) -> list[Expense]: ...
 
     def list_categories(self) -> list[str]: ...
@@ -116,6 +120,12 @@ class ExpenseService:
 
     def list_expenses(self) -> list[Expense]:
         return self._repository.list_all()
+
+    def update_expenses(self, expenses: list[Expense]) -> None:
+        self._repository.update_expenses(expenses)
+
+    def delete_expenses(self, expense_ids: list[int]) -> None:
+        self._repository.delete_expenses(expense_ids)
 
     def list_categories(self) -> list[str]:
         return self._repository.list_categories()

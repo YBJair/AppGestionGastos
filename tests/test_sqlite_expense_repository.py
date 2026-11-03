@@ -42,6 +42,87 @@ def test_repository_persists_and_reads_expenses(tmp_path) -> None:
     assert row["import_job_id"] is None
     assert row["import_item_id"] is None
 
+def test_update_expense_changes_fields_and_preserves_import_metadata(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "update-expense.sqlite3")
+    database.initialize()
+    saved = database.add(
+        Expense(
+            "Hogar",
+            "Compra inicial",
+            Decimal("12.50"),
+            date(2026, 1, 1),
+            subcategory="General",
+        )
+    )
+    with database.connect() as connection:
+        job_id = connection.execute(
+            "INSERT INTO import_jobs (source_type, filename) VALUES ('CSV', 'cargas.csv')"
+        ).lastrowid
+        item_id = connection.execute(
+            """
+            INSERT INTO import_items (
+                import_job_id, raw_description, amount, expense_date
+            ) VALUES (?, 'Cargo banco', 1250, '2026-01-01')
+            """,
+            (job_id,),
+        ).lastrowid
+        connection.execute(
+            "UPDATE expenses SET source = 'import', import_description = ?, "
+            "import_job_id = ?, import_item_id = ? WHERE id = ?",
+            ("cargo banco", job_id, item_id, saved.id),
+        )
+
+    database.update_expenses(
+        [
+            Expense(
+                "Alimentación",
+                "Compra semanal",
+                Decimal("34.75"),
+                date(2026, 2, 3),
+                id=saved.id,
+                subcategory="Supermercado",
+            )
+        ]
+    )
+
+    updated = database.list_all()[0]
+    with database.connect() as connection:
+        metadata = connection.execute(
+            "SELECT source, import_description, import_job_id, import_item_id "
+            "FROM expenses WHERE id = ?",
+            (saved.id,),
+        ).fetchone()
+    assert updated.description == "Compra semanal"
+    assert updated.amount == Decimal("34.75")
+    assert updated.spent_on == date(2026, 2, 3)
+    assert updated.category == "Alimentación"
+    assert updated.subcategory == "Supermercado"
+    assert metadata["source"] == "import"
+    assert metadata["import_description"] == "cargo banco"
+    assert metadata["import_job_id"] == job_id
+    assert metadata["import_item_id"] == item_id
+
+
+def test_delete_expenses_removes_only_selected_ids(tmp_path) -> None:
+    database = SQLiteDatabase(tmp_path / "delete-expense.sqlite3")
+    database.initialize()
+    expenses = [
+        database.add(
+            Expense(
+                "Hogar",
+                description,
+                Decimal("5.00"),
+                date(2026, 1, index),
+                subcategory="General",
+            )
+        )
+        for index, description in enumerate(("Primero", "Segundo"), start=1)
+    ]
+
+    database.delete_expenses([expenses[0].id])
+
+    assert [expense.description for expense in database.list_all()] == ["Segundo"]
+
 
 def test_list_expense_descriptions_returns_distinct_non_empty_values(tmp_path) -> None:
     database = SQLiteDatabase(tmp_path / "descriptions.sqlite3")

@@ -25,7 +25,7 @@ def _create_window(tmp_path, expenses: list[Expense]) -> tuple[SQLiteDatabase, M
 
 def _row_for_id(window: MainWindow, expense_id: int) -> int:
     for row in range(window.table.rowCount()):
-        if window.table.item(row, 5).data(Qt.ItemDataRole.UserRole) == expense_id:
+        if window.table.item(row, 6).data(Qt.ItemDataRole.UserRole) == expense_id:
             return row
     raise AssertionError(f"Gasto {expense_id} no encontrado en la tabla")
 
@@ -52,7 +52,7 @@ def test_edit_marks_row_and_only_persists_after_confirmation(tmp_path) -> None:
     window.table.item(row, 3).setText("Alimentación")
     window.table.item(row, 4).setText("Supermercado")
 
-    check_item = window.table.item(row, 5)
+    check_item = window.table.item(row, 6)
     assert check_item.checkState() == Qt.CheckState.Checked
     assert database.list_all()[0].description == "Compra"
 
@@ -74,7 +74,7 @@ def test_edit_marks_row_and_only_persists_after_confirmation(tmp_path) -> None:
     assert updated.amount == Decimal("34.75")
     assert updated.category == "Alimentación"
     assert updated.subcategory == "Supermercado"
-    assert window.table.item(0, 5).checkState() == Qt.CheckState.Unchecked
+    assert window.table.item(0, 6).checkState() == Qt.CheckState.Unchecked
     application.processEvents()
 
 
@@ -86,14 +86,14 @@ def test_delete_cancel_preserves_checks_and_confirm_deletes_only_checked(tmp_pat
     expenses = database.list_all()
     first_row = _row_for_id(window, expenses[0].id)
     _row_for_id(window, expenses[1].id)
-    window.table.item(first_row, 5).setCheckState(Qt.CheckState.Checked)
+    window.table.item(first_row, 6).setCheckState(Qt.CheckState.Checked)
 
     with patch.object(
         QMessageBox, "question", return_value=QMessageBox.StandardButton.No
     ) as confirm:
         window._delete_selected_expenses()
     assert confirm.call_args.args[2] == "¿Estás seguro de querer borrar 1 líneas?"
-    assert window.table.item(first_row, 5).checkState() == Qt.CheckState.Checked
+    assert window.table.item(first_row, 6).checkState() == Qt.CheckState.Checked
     assert len(database.list_all()) == 2
 
     with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):

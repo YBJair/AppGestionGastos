@@ -236,6 +236,7 @@ def test_initialize_creates_all_requested_tables(tmp_path) -> None:
             "created_at",
             "import_job_id",
             "import_item_id",
+            "generic",
         },
         "import_jobs": {"id", "source_type", "filename", "imported_at", "status"},
         "import_items": {
@@ -244,6 +245,7 @@ def test_initialize_creates_all_requested_tables(tmp_path) -> None:
             "raw_description",
                "user_description",
             "normalized_description",
+            "generic",
             "amount",
             "expense_date",
             "category_id",

@@ -14,6 +14,7 @@ class Expense:
     subcategory: str | None = None
     import_job_id: int | None = None
     import_item_id: int | None = None
+    generic: bool = False
 
     def __post_init__(self) -> None:
         if not self.category.strip():
@@ -60,6 +61,7 @@ class ImportClassification:
     subcategory_id: int | None
     create_expense: bool
     similarity: float | None = None
+    generic: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +87,8 @@ class PendingImportItemSummary:
     category: str | None
     subcategory: str | None
     expense_date: date
+    id: int
+    generic: bool
 
 
 @dataclass(frozen=True, slots=True)

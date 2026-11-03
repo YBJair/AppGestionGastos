@@ -1,6 +1,7 @@
 import sqlite3
 
 from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -112,9 +113,9 @@ class PendingImportItemsView(QWidget):
         self._service = service
         self._classification = classification
 
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha"]
+            ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha", "Genérico", "OK"]
         )
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -137,3 +138,19 @@ class PendingImportItemsView(QWidget):
             )
             for column_index, value in enumerate(values):
                 self.table.setItem(row_index, column_index, QTableWidgetItem(value))
+
+            generic_item = QTableWidgetItem()
+            generic_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            generic_item.setCheckState(
+                Qt.CheckState.Checked if item.generic else Qt.CheckState.Unchecked
+            )
+            self.table.setItem(row_index, 6, generic_item)
+
+            ok_item = QTableWidgetItem()
+            ok_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            ok_item.setCheckState(Qt.CheckState.Unchecked)
+            self.table.setItem(row_index, 7, ok_item)

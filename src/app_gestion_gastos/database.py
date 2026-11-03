@@ -51,7 +51,8 @@ SCHEMA = (
         source TEXT NOT NULL DEFAULT 'manual',
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
         import_job_id INTEGER REFERENCES import_jobs(id) ON DELETE SET NULL,
-        import_item_id INTEGER REFERENCES import_items(id) ON DELETE SET NULL
+        import_item_id INTEGER REFERENCES import_items(id) ON DELETE SET NULL,
+        generic INTEGER NOT NULL DEFAULT 0 CHECK (generic IN (0, 1))
     )
     """,
     """
@@ -70,6 +71,7 @@ SCHEMA = (
         raw_description TEXT NOT NULL,
         user_description TEXT,
         normalized_description TEXT,
+        generic INTEGER NOT NULL DEFAULT 0 CHECK (generic IN (0, 1)),
         amount INTEGER NOT NULL CHECK (amount > 0),
         expense_date TEXT NOT NULL,
         category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
@@ -149,6 +151,8 @@ class SQLiteDatabase:
                 SELECT
                     import_items.raw_description,
                     import_items.user_description,
+                    import_items.id,
+                    import_items.generic,
                     import_items.amount,
                     categories.name AS category,
                     subcategories.name AS subcategory,
@@ -169,6 +173,8 @@ class SQLiteDatabase:
                     category=row["category"],
                     subcategory=row["subcategory"],
                     expense_date=date.fromisoformat(row["expense_date"]),
+                    id=row["id"],
+                    generic=bool(row["generic"]),
                 )
                 for row in rows
             ]
@@ -383,8 +389,9 @@ class SQLiteDatabase:
                         """
                         INSERT INTO expenses (
                             description, import_description, expense_date, amount,
-                            category_id, subcategory_id, source, import_job_id, import_item_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?)
+                            category_id, subcategory_id, source, import_job_id, import_item_id,
+                            generic
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?, ?)
                         """,
                         (
                             item["user_description"],
@@ -395,6 +402,7 @@ class SQLiteDatabase:
                             item["subcategory_id"],
                             item["import_job_id"],
                             import_item_id,
+                            item["generic"],
                         ),
                     )
             connection.execute(
@@ -418,8 +426,8 @@ class SQLiteDatabase:
             INSERT INTO import_items (
                 import_job_id, raw_description, user_description,
                 normalized_description, amount, expense_date, category_id,
-                subcategory_id, classification, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                subcategory_id, classification, status, generic
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 import_job_id,
@@ -432,6 +440,7 @@ class SQLiteDatabase:
                 classification.subcategory_id,
                 classification.classification,
                 classification.status,
+                int(classification.generic),
             ),
         ).lastrowid
         expense_id = None
@@ -440,8 +449,9 @@ class SQLiteDatabase:
                 """
                 INSERT INTO expenses (
                     description, import_description, expense_date, amount,
-                    category_id, subcategory_id, source, import_job_id, import_item_id
-                ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?)
+                    category_id, subcategory_id, source, import_job_id, import_item_id,
+                    generic
+                ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?, ?)
                 """,
                 (
                     classification.user_description,
@@ -452,6 +462,7 @@ class SQLiteDatabase:
                     classification.subcategory_id,
                     import_job_id,
                     item_id,
+                    int(classification.generic),
                 ),
             ).lastrowid
         return ImportProcessingResult(item_id, classification, expense_id)
@@ -483,19 +494,57 @@ class SQLiteDatabase:
         if not normalized:
             return unknown
 
-        exact = connection.execute(
+        candidates = connection.execute(
             """
-            SELECT description, category_id, subcategory_id
+            SELECT import_description, description, category_id, subcategory_id, generic
             FROM expenses
-            WHERE import_description = ?
-                AND category_id IS NOT NULL
+            WHERE category_id IS NOT NULL
                 AND subcategory_id IS NOT NULL
+                AND (
+                    (import_description IS NOT NULL AND length(trim(import_description)) > 0)
+                    OR generic = 1
+                )
             ORDER BY expense_date DESC, id DESC
-            LIMIT 1
-            """,
-            (normalized,),
-        ).fetchone()
-        if exact is not None:
+            """
+        ).fetchall()
+        candidate_descriptions = [
+            normalize_text(row["import_description"] or row["description"])
+            for row in candidates
+        ]
+
+        generic_exact_index = next(
+            (
+                index
+                for index, row in enumerate(candidates)
+                if row["generic"] and candidate_descriptions[index] == normalized
+            ),
+            None,
+        )
+        if generic_exact_index is not None:
+            generic_exact = candidates[generic_exact_index]
+            return ImportClassification(
+                classification="similar",
+                status="pending",
+                user_description=generic_exact["description"],
+                category_id=generic_exact["category_id"],
+                subcategory_id=generic_exact["subcategory_id"],
+                create_expense=False,
+                similarity=100.0,
+                generic=True,
+            )
+
+        exact_index = next(
+            (
+                index
+                for index, row in enumerate(candidates)
+                if row["import_description"]
+                and not row["generic"]
+                and candidate_descriptions[index] == normalized
+            ),
+            None,
+        )
+        if exact_index is not None:
+            exact = candidates[exact_index]
             return ImportClassification(
                 classification="identical",
                 status="accepted",
@@ -504,23 +553,8 @@ class SQLiteDatabase:
                 subcategory_id=exact["subcategory_id"],
                 create_expense=True,
                 similarity=100.0,
+                generic=False,
             )
-
-        candidates = connection.execute(
-            """
-            SELECT import_description, description, category_id, subcategory_id
-            FROM expenses
-            WHERE import_description IS NOT NULL
-                AND length(trim(import_description)) > 0
-                AND category_id IS NOT NULL
-                AND subcategory_id IS NOT NULL
-            ORDER BY expense_date DESC, id DESC
-            """
-        ).fetchall()
-
-        candidate_descriptions = [
-            normalize_text(row["import_description"]) for row in candidates
-        ]
         match = process.extractOne(
             normalized,
             candidate_descriptions,
@@ -539,6 +573,7 @@ class SQLiteDatabase:
             subcategory_id=matched_row["subcategory_id"],
             create_expense=False,
             similarity=match[1],
+            generic=bool(matched_row["generic"]),
         )
 
     @staticmethod
@@ -558,6 +593,11 @@ class SQLiteDatabase:
                 "ALTER TABLE expenses ADD COLUMN import_item_id INTEGER "
                 "REFERENCES import_items(id) ON DELETE SET NULL"
             )
+        if "generic" not in expense_columns:
+            connection.execute(
+                "ALTER TABLE expenses ADD COLUMN generic INTEGER NOT NULL DEFAULT 0 "
+                "CHECK (generic IN (0, 1))"
+            )
 
         import_items_row = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'import_items'"
@@ -567,9 +607,11 @@ class SQLiteDatabase:
             row["name"] for row in connection.execute("PRAGMA table_info(import_items)")
         }
         has_user_description = "user_description" in import_item_columns
+        has_generic = "generic" in import_item_columns
         has_classification_check = "check (classification in" in import_items_schema.lower()
-        if not has_user_description or not has_classification_check:
+        if not has_user_description or not has_generic or not has_classification_check:
             user_description_source = "user_description" if has_user_description else "NULL"
+            generic_source = "generic" if has_generic else "0"
             connection.execute(
                 """
                 CREATE TABLE import_items_new (
@@ -578,6 +620,7 @@ class SQLiteDatabase:
                     raw_description TEXT NOT NULL,
                     user_description TEXT,
                     normalized_description TEXT,
+                    generic INTEGER NOT NULL DEFAULT 0 CHECK (generic IN (0, 1)),
                     amount INTEGER NOT NULL CHECK (amount > 0),
                     expense_date TEXT NOT NULL,
                     category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
@@ -592,13 +635,14 @@ class SQLiteDatabase:
             connection.execute(
                 f"""
                 INSERT INTO import_items_new (
-                    id, import_job_id, raw_description, user_description, normalized_description,
+                    id, import_job_id, raw_description, user_description,
+                    normalized_description, generic,
                     amount, expense_date, category_id, subcategory_id,
                     classification, status
                 )
                 SELECT
                     id, import_job_id, raw_description, {user_description_source},
-                    normalized_description,
+                    normalized_description, {generic_source},
                     amount, expense_date, category_id, subcategory_id,
                     CASE WHEN classification IN ('identical', 'similar', 'unknown')
                         THEN classification ELSE 'unknown' END,
@@ -644,9 +688,10 @@ class SQLiteDatabase:
             cursor = connection.execute(
                 """
                 INSERT INTO expenses (
-                    description, expense_date, amount, category_id, subcategory_id, source
+                    description, expense_date, amount, category_id, subcategory_id, source,
+                    generic
                 )
-                VALUES (?, ?, ?, ?, ?, 'manual')
+                VALUES (?, ?, ?, ?, ?, 'manual', ?)
                 """,
                 (
                     expense.description,
@@ -654,6 +699,7 @@ class SQLiteDatabase:
                     int(amount_cents),
                     category_id,
                     subcategory_id,
+                    int(expense.generic),
                 ),
             )
             expense_id = cursor.lastrowid
@@ -664,6 +710,7 @@ class SQLiteDatabase:
             amount=expense.amount,
             spent_on=expense.spent_on,
             subcategory=expense.subcategory,
+            generic=expense.generic,
         )
 
     def update_expenses(self, expenses: list[Expense]) -> None:
@@ -710,7 +757,7 @@ class SQLiteDatabase:
                     """
                     UPDATE expenses
                     SET description = ?, expense_date = ?, amount = ?,
-                        category_id = ?, subcategory_id = ?
+                        category_id = ?, subcategory_id = ?, generic = ?
                     WHERE id = ?
                     """,
                     (
@@ -719,6 +766,7 @@ class SQLiteDatabase:
                         int(amount_cents),
                         category_id,
                         subcategory_id,
+                        int(expense.generic),
                         expense.id,
                     ),
                 )
@@ -741,7 +789,7 @@ class SQLiteDatabase:
                 "SELECT expenses.id, categories.name AS category, "
                 "subcategories.name AS subcategory, "
                 "expenses.description, expenses.amount, expenses.expense_date, "
-                "expenses.import_job_id, expenses.import_item_id "
+                "expenses.import_job_id, expenses.import_item_id, expenses.generic "
                 "FROM expenses LEFT JOIN categories ON categories.id = expenses.category_id "
                 "LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id "
                 "ORDER BY expenses.expense_date DESC, expenses.id DESC"
@@ -756,6 +804,7 @@ class SQLiteDatabase:
                 subcategory=row["subcategory"],
                 import_job_id=row["import_job_id"],
                 import_item_id=row["import_item_id"],
+                generic=bool(row["generic"]),
             )
             for row in rows
         ]
@@ -902,7 +951,7 @@ class SQLiteDatabase:
                 "SELECT expenses.id, COALESCE(categories.name, 'Sin categoria') AS category, "
                 "COALESCE(subcategories.name, 'Sin subcategoria') AS subcategory, "
                 "expenses.description, expenses.amount, expenses.expense_date, "
-                "expenses.import_job_id, expenses.import_item_id "
+                "expenses.import_job_id, expenses.import_item_id, expenses.generic "
                 "FROM expenses "
                 "LEFT JOIN categories ON categories.id = expenses.category_id "
                 "LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id "
@@ -920,6 +969,7 @@ class SQLiteDatabase:
                 subcategory=row["subcategory"],
                 import_job_id=row["import_job_id"],
                 import_item_id=row["import_item_id"],
+                generic=bool(row["generic"]),
             )
             for row in rows
         ]

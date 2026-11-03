@@ -90,11 +90,14 @@ def test_import_views_show_requested_columns_and_enabled_import_buttons(tmp_path
 
     similar_view = PendingImportItemsView(ExpenseService(database), "similar")
     new_view = PendingImportItemsView(ExpenseService(database), "unknown")
-    expected_headers = ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha"]
-    assert [similar_view.table.horizontalHeaderItem(i).text() for i in range(6)] == expected_headers
-    assert [new_view.table.horizontalHeaderItem(i).text() for i in range(6)] == expected_headers
+    expected_headers = ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha", "Genérico", "OK"]
+    assert [similar_view.table.horizontalHeaderItem(i).text() for i in range(8)] == expected_headers
+    assert [new_view.table.horizontalHeaderItem(i).text() for i in range(8)] == expected_headers
+    assert similar_view.table.horizontalHeaderItem(similar_view.table.columnCount() - 1).text() == "OK"
+    assert new_view.table.horizontalHeaderItem(new_view.table.columnCount() - 1).text() == "OK"
 
     window = MainWindow(ExpenseService(database))
+    assert window.table.horizontalHeaderItem(window.table.columnCount() - 1).text() == "Seleccionar"
     tab_names = [window.tabs.tabText(index) for index in range(window.tabs.count())]
     assert tab_names[-3:] == ["Importaciones", "Similares", "Nuevas"]
     application.processEvents()

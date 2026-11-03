@@ -291,9 +291,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AppGestionGastos")
         self.resize(820, 480)
 
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["Fecha", "Descripcion", "Importe", "Categoria", "Subcategoria", "Seleccionar"]
+            ["Fecha", "Descripcion", "Importe", "Categoria", "Subcategoria", "Generico", "Seleccionar"]
         )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -354,6 +354,17 @@ class MainWindow(QMainWindow):
                     alignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     item.setTextAlignment(alignment)
                 self.table.setItem(row_index, column_index, item)
+            generic_item = QTableWidgetItem()
+            generic_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            generic_item.setCheckState(
+                Qt.CheckState.Checked if expense.generic else Qt.CheckState.Unchecked
+            )
+            self.table.setItem(row_index, 5, generic_item)
+
             checked_item = QTableWidgetItem()
             checked_item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled
@@ -362,7 +373,7 @@ class MainWindow(QMainWindow):
             )
             checked_item.setCheckState(Qt.CheckState.Unchecked)
             checked_item.setData(Qt.ItemDataRole.UserRole, expense.id)
-            self.table.setItem(row_index, 5, checked_item)
+            self.table.setItem(row_index, 6, checked_item)
         self._loading_table = False
         self.chart_view.refresh()
         self.import_jobs_view.refresh()
@@ -370,9 +381,9 @@ class MainWindow(QMainWindow):
         self.new_import_items_view.refresh()
 
     def _expense_cell_changed(self, item: QTableWidgetItem) -> None:
-        if self._loading_table or item.column() == 5:
+        if self._loading_table or item.column() == 6:
             return
-        checked_item = self.table.item(item.row(), 5)
+        checked_item = self.table.item(item.row(), 6)
         if checked_item.checkState() != Qt.CheckState.Checked:
             self.table.blockSignals(True)
             checked_item.setCheckState(Qt.CheckState.Checked)
@@ -382,7 +393,7 @@ class MainWindow(QMainWindow):
         return [
             row
             for row in range(self.table.rowCount())
-            if self.table.item(row, 5).checkState() == Qt.CheckState.Checked
+            if self.table.item(row, 6).checkState() == Qt.CheckState.Checked
         ]
 
     def _delete_selected_expenses(self) -> None:
@@ -399,7 +410,7 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         expense_ids = [
-            self.table.item(row, 5).data(Qt.ItemDataRole.UserRole) for row in rows
+            self.table.item(row, 6).data(Qt.ItemDataRole.UserRole) for row in rows
         ]
         self._service.delete_expenses(expense_ids)
         self.refresh()
@@ -431,7 +442,7 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def _expense_from_row(self, row: int) -> Expense:
-        expense_id = self.table.item(row, 5).data(Qt.ItemDataRole.UserRole)
+        expense_id = self.table.item(row, 6).data(Qt.ItemDataRole.UserRole)
         date_text = self.table.item(row, 0).text().strip()
         description = self.table.item(row, 1).text().strip()
         amount_text = (
@@ -447,6 +458,7 @@ class MainWindow(QMainWindow):
             spent_on=date.fromisoformat(date_text),
             id=expense_id,
             subcategory=self.table.item(row, 4).text().strip(),
+            generic=self.table.item(row, 5).checkState() == Qt.CheckState.Checked,
         )
 
     def _main_tab_changed(self, index: int) -> None:

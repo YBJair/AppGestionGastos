@@ -56,6 +56,15 @@ class ExpenseRepository(Protocol):
 
     def accept_import_item(self, import_item_id: int) -> None: ...
 
+    def accept_import_item_with_data(
+        self,
+        import_item_id: int,
+        user_description: str,
+        category: str,
+        subcategory: str,
+        generic: bool = False,
+    ) -> None: ...
+
     def list_import_jobs(self) -> list[ImportJobSummary]: ...
 
     def list_pending_import_items(
@@ -169,6 +178,18 @@ class ExpenseService:
 
     def accept_import_item(self, import_item_id: int) -> None:
         self._repository.accept_import_item(import_item_id)
+
+    def accept_import_item_with_data(
+        self,
+        import_item_id: int,
+        user_description: str,
+        category: str,
+        subcategory: str,
+        generic: bool = False,
+    ) -> None:
+        self._repository.accept_import_item_with_data(
+            import_item_id, user_description, category, subcategory, generic
+        )
 
     def list_import_jobs(self) -> list[ImportJobSummary]:
         return self._repository.list_import_jobs()

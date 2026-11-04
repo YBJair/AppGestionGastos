@@ -411,6 +411,97 @@ class SQLiteDatabase:
             )
             self._refresh_import_job_status(connection, item["import_job_id"])
 
+    def accept_import_item_with_data(
+        self,
+        import_item_id: int,
+        user_description: str,
+        category: str,
+        subcategory: str,
+        generic: bool = False,
+    ) -> None:
+        with self.connect() as connection:
+            item = connection.execute(
+                "SELECT * FROM import_items WHERE id = ?", (import_item_id,)
+            ).fetchone()
+            if item is None:
+                raise ValueError("No existe la línea de importación.")
+            if item["status"] == "accepted":
+                self._refresh_import_job_status(connection, item["import_job_id"])
+                return
+
+            user_description = user_description.strip()
+            category = category.strip()
+            subcategory = subcategory.strip()
+            if not user_description or not category or not subcategory:
+                raise ValueError("Completa alias, categoría y subcategoría antes de aceptar.")
+
+            connection.execute(
+                "INSERT INTO categories (name) VALUES (?) ON CONFLICT(name) DO NOTHING",
+                (category,),
+            )
+            category_row = connection.execute(
+                "SELECT id FROM categories WHERE name = ?", (category,)
+            ).fetchone()
+            category_id = category_row["id"]
+            connection.execute(
+                """
+                INSERT INTO subcategories (category_id, name) VALUES (?, ?)
+                ON CONFLICT(category_id, name) DO NOTHING
+                """,
+                (category_id, subcategory),
+            )
+            subcategory_row = connection.execute(
+                """
+                SELECT id FROM subcategories
+                WHERE category_id = ? AND name = ?
+                """,
+                (category_id, subcategory),
+            ).fetchone()
+            subcategory_id = subcategory_row["id"]
+
+            connection.execute(
+                """
+                UPDATE import_items
+                SET user_description = ?, category_id = ?, subcategory_id = ?, generic = ?
+                WHERE id = ?
+                """,
+                (user_description, category_id, subcategory_id, int(generic), import_item_id),
+            )
+
+            item = connection.execute(
+                "SELECT * FROM import_items WHERE id = ?", (import_item_id,)
+            ).fetchone()
+            existing_expense = connection.execute(
+                "SELECT id FROM expenses WHERE import_item_id = ? LIMIT 1",
+                (import_item_id,),
+            ).fetchone()
+            if existing_expense is None:
+                connection.execute(
+                    """
+                    INSERT INTO expenses (
+                        description, import_description, expense_date, amount,
+                        category_id, subcategory_id, source, import_job_id, import_item_id,
+                        generic
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'import', ?, ?, ?)
+                    """,
+                    (
+                        item["user_description"],
+                        item["normalized_description"],
+                        item["expense_date"],
+                        item["amount"],
+                        item["category_id"],
+                        item["subcategory_id"],
+                        item["import_job_id"],
+                        import_item_id,
+                        item["generic"],
+                    ),
+                )
+
+            connection.execute(
+                "UPDATE import_items SET status = 'accepted' WHERE id = ?",
+                (import_item_id,),
+            )
+            self._refresh_import_job_status(connection, item["import_job_id"])
     def _insert_classified_import_item(
         self,
         connection: sqlite3.Connection,

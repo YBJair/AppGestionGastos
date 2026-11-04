@@ -3,10 +3,14 @@ import sqlite3
 from PySide6.QtCore import Signal
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
+    QCompleter,
     QFileDialog,
     QHBoxLayout,
+    QLineEdit,
     QMessageBox,
     QPushButton,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -102,7 +106,72 @@ class ImportJobsView(QWidget):
         )
 
 
+class AliasDelegate(QStyledItemDelegate):
+    def __init__(self, service, parent=None):
+        super().__init__(parent)
+        self._service = service
+
+    def createEditor(self, parent, option, index):
+        editor = QLineEdit(parent)
+        completer = QCompleter(self._service.list_expense_descriptions(), editor)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        editor.setCompleter(completer)
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.ItemDataRole.DisplayRole)
+        editor.setText(value if value is not None else "")
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.text(), Qt.ItemDataRole.DisplayRole)
+
+
+class CategoryDelegate(QStyledItemDelegate):
+    def __init__(self, service, parent=None):
+        super().__init__(parent)
+        self._service = service
+
+    def createEditor(self, parent, option, index):
+        editor = QComboBox(parent)
+        editor.setEditable(True)
+        editor.addItems(self._service.list_categories())
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.ItemDataRole.DisplayRole)
+        editor.setCurrentText(value if value is not None else "")
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText(), Qt.ItemDataRole.DisplayRole)
+
+
+class SubcategoryDelegate(QStyledItemDelegate):
+    def __init__(self, service, parent=None):
+        super().__init__(parent)
+        self._service = service
+
+    def createEditor(self, parent, option, index):
+        category_index = index.sibling(index.row(), 3)
+        category = ""
+        if category_index.isValid():
+            value = index.model().data(category_index, Qt.ItemDataRole.DisplayRole)
+            category = value if value is not None else ""
+        editor = QComboBox(parent)
+        editor.setEditable(True)
+        editor.addItems(self._service.list_subcategories(category))
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.ItemDataRole.DisplayRole)
+        editor.setCurrentText(value if value is not None else "")
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText(), Qt.ItemDataRole.DisplayRole)
+
+
 class PendingImportItemsView(QWidget):
+    import_completed = Signal()
+
     def __init__(
         self,
         service: ExpenseService,
@@ -117,14 +186,20 @@ class PendingImportItemsView(QWidget):
         self.table.setHorizontalHeaderLabels(
             ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha", "Genérico", "OK"]
         )
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setItemDelegateForColumn(1, AliasDelegate(service))
+        self.table.setItemDelegateForColumn(3, CategoryDelegate(service))
+        self.table.setItemDelegateForColumn(4, SubcategoryDelegate(service))
+        self._loading = False
+        self.table.itemChanged.connect(self._item_changed)
         layout = QVBoxLayout(self)
         layout.addWidget(self.table)
         self.refresh()
 
     def refresh(self) -> None:
+        self._loading = True
         items = self._service.list_pending_import_items(self._classification)
         self.table.setRowCount(len(items))
         for row_index, item in enumerate(items):
@@ -137,10 +212,20 @@ class PendingImportItemsView(QWidget):
                 item.expense_date.isoformat(),
             )
             for column_index, value in enumerate(values):
-                self.table.setItem(row_index, column_index, QTableWidgetItem(value))
+                cell = QTableWidgetItem(value)
+                cell.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                    | Qt.ItemFlag.ItemIsEditable
+                )
+                self.table.setItem(row_index, column_index, cell)
 
             generic_item = QTableWidgetItem()
-            generic_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            generic_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
             generic_item.setCheckState(
                 Qt.CheckState.Checked if item.generic else Qt.CheckState.Unchecked
             )
@@ -153,4 +238,33 @@ class PendingImportItemsView(QWidget):
                 | Qt.ItemFlag.ItemIsUserCheckable
             )
             ok_item.setCheckState(Qt.CheckState.Unchecked)
+            ok_item.setData(Qt.ItemDataRole.UserRole, item.id)
             self.table.setItem(row_index, 7, ok_item)
+        self._loading = False
+
+    def _item_changed(self, item):
+        from PySide6.QtWidgets import QMessageBox
+        if self._loading or item.column() != 7:
+            return
+        if item.checkState() != Qt.CheckState.Checked:
+            return
+        row = item.row()
+        try:
+            alias = self.table.item(row, 1).text().strip()
+            if not alias:
+                alias = self.table.item(row, 0).text().strip()
+            category = self.table.item(row, 3).text().strip()
+            subcategory = self.table.item(row, 4).text().strip()
+            generic = self.table.item(row, 6).checkState() == Qt.CheckState.Checked
+            import_item_id = self.table.item(row, 7).data(Qt.ItemDataRole.UserRole)
+            self._service.accept_import_item_with_data(
+                import_item_id, alias, category, subcategory, generic
+            )
+        except Exception as error:
+            self.table.blockSignals(True)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.table.blockSignals(False)
+            QMessageBox.warning(self, 'No se pudo aceptar', str(error))
+            return
+        self.refresh()
+        self.import_completed.emit()

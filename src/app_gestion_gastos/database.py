@@ -468,6 +468,27 @@ class SQLiteDatabase:
                 (user_description, category_id, subcategory_id, int(generic), import_item_id),
             )
 
+            if item["classification"] == "unknown":
+                connection.execute(
+                    """
+                    UPDATE import_items
+                    SET user_description = ?, category_id = ?, subcategory_id = ?
+                    WHERE import_job_id = ?
+                      AND normalized_description = ?
+                      AND status = 'pending'
+                      AND classification = 'unknown'
+                      AND id <> ?
+                    """,
+                    (
+                        user_description,
+                        category_id,
+                        subcategory_id,
+                        item["import_job_id"],
+                        item["normalized_description"],
+                        import_item_id,
+                    ),
+                )
+
             item = connection.execute(
                 "SELECT * FROM import_items WHERE id = ?", (import_item_id,)
             ).fetchone()

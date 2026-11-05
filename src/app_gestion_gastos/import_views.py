@@ -194,7 +194,13 @@ class PendingImportItemsView(QWidget):
         self.table.setItemDelegateForColumn(4, SubcategoryDelegate(service))
         self._loading = False
         self.table.itemChanged.connect(self._item_changed)
+        self.delete_button = QPushButton("Borrar")
+        self.delete_button.clicked.connect(self._delete_selected)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.delete_button)
+        buttons.addStretch()
         layout = QVBoxLayout(self)
+        layout.addLayout(buttons)
         layout.addWidget(self.table)
         self.refresh()
 
@@ -268,3 +274,36 @@ class PendingImportItemsView(QWidget):
             return
         self.refresh()
         self.import_completed.emit()
+    def _delete_selected(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        selected_rows = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
+        if not selected_rows and self.table.currentRow() >= 0:
+            selected_rows = [self.table.currentRow()]
+        if not selected_rows:
+            return
+
+        item_ids = [self.table.item(row, 7).data(Qt.ItemDataRole.UserRole) for row in selected_rows]
+        item_ids = [item_id for item_id in item_ids if item_id is not None]
+        if not item_ids:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Confirmar borrado",
+            f"¿Estás seguro de querer borrar {len(item_ids)} líneas?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self._service.delete_import_items(item_ids)
+        except Exception as error:
+            QMessageBox.warning(self, "No se pudo borrar", str(error))
+            return
+
+        self.refresh()
+        self.import_completed.emit()
+

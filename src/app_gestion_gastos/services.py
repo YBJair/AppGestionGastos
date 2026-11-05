@@ -56,6 +56,8 @@ class ExpenseRepository(Protocol):
 
     def accept_import_item(self, import_item_id: int) -> None: ...
 
+    def delete_import_items(self, import_item_ids: list[int]) -> None: ...
+
     def accept_import_item_with_data(
         self,
         import_item_id: int,
@@ -190,6 +192,9 @@ class ExpenseService:
         self._repository.accept_import_item_with_data(
             import_item_id, user_description, category, subcategory, generic
         )
+
+    def delete_import_items(self, import_item_ids: list[int]) -> None:
+        self._repository.delete_import_items(import_item_ids)
 
     def list_import_jobs(self) -> list[ImportJobSummary]:
         return self._repository.list_import_jobs()

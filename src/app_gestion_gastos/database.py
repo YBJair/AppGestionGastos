@@ -523,6 +523,22 @@ class SQLiteDatabase:
                 (import_item_id,),
             )
             self._refresh_import_job_status(connection, item["import_job_id"])
+    def delete_import_items(self, import_item_ids: list[int]) -> None:
+        if not import_item_ids:
+            return
+        with self.connect() as connection:
+            placeholders = ", ".join("?" for _ in import_item_ids)
+            job_rows = connection.execute(
+                f"SELECT DISTINCT import_job_id FROM import_items WHERE id IN ({placeholders})",
+                tuple(import_item_ids),
+            ).fetchall()
+            connection.execute(
+                f"DELETE FROM import_items WHERE id IN ({placeholders})",
+                tuple(import_item_ids),
+            )
+            for row in job_rows:
+                self._refresh_import_job_status(connection, row["import_job_id"])
+
     def _insert_classified_import_item(
         self,
         connection: sqlite3.Connection,
@@ -592,7 +608,7 @@ class SQLiteDatabase:
         ).fetchone()
         status = (
             "completed"
-            if counts["total"] > 0 and counts["awaiting_acceptance"] == 0
+            if counts["total"] == 0 or (counts["total"] > 0 and counts["awaiting_acceptance"] == 0)
             else "pending"
         )
         connection.execute(

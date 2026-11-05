@@ -246,6 +246,8 @@ class ExpenseChartView(QWidget):
                     label=category,
                 )
                 self._bar_artists.extend(bars.patches)
+                for bar in bars.patches:
+                    bar._hover_category = category
             self.axes.legend(title="Categoría", loc="upper left", bbox_to_anchor=(1.01, 1))
         else:
             values = {item.period: float(item.amount) for item in chart_data}
@@ -291,9 +293,12 @@ class ExpenseChartView(QWidget):
         hovered_bar.set_linewidth(1.8)
         hovered_bar.set_alpha(0.82)
         self._hover_annotation.xy = (event.xdata, event.ydata)
-        self._hover_annotation.set_text(
-            self._format_amount(Decimal(str(hovered_bar.get_height())))
-        )
+        category = getattr(self._hover_bar, "_hover_category", None)
+        amount_text = self._format_amount(Decimal(str(self._hover_bar.get_height())))
+        if category is not None:
+            self._hover_annotation.set_text(f"{category}\n{amount_text}")
+        else:
+            self._hover_annotation.set_text(amount_text)
         self._hover_annotation.set_visible(True)
         self.canvas.draw_idle()
 

@@ -67,6 +67,10 @@ class ExpenseBreakdownView(QWidget):
 
         self.generate_button = QPushButton("Generar desglose")
         self.generate_button.clicked.connect(self._generate)
+        self.period_tabs.currentChanged.connect(self._generate)
+        self.year_input.valueChanged.connect(self._generate)
+        self.start_date_input.dateChanged.connect(self._generate)
+        self.end_date_input.dateChanged.connect(self._generate)
         self.results_tree = QTreeWidget()
         self.results_tree.setColumnCount(2)
         self.results_tree.setHeaderLabels(["Mes / categoría / subcategoría", "Suma de importe"])
@@ -84,6 +88,7 @@ class ExpenseBreakdownView(QWidget):
         layout.addWidget(self.generate_button, alignment=Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.results_tree, 1)
         layout.addWidget(self.total_label)
+        self._generate()
 
     def _generate(self) -> None:
         if self.period_tabs.currentIndex() == 0:
@@ -131,7 +136,7 @@ class ExpenseBreakdownView(QWidget):
 
         for month, item in month_items.items():
             item.setText(1, self._format_amount(month_totals[month]))
-            item.setExpanded(True)
+            item.setExpanded(False)
         for key, item in category_items.items():
             item.setText(1, self._format_amount(category_totals[key]))
             item.setExpanded(True)

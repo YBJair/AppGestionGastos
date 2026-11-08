@@ -68,6 +68,9 @@ class ExpenseChartView(QWidget):
         month_layout.addWidget(self.month_input)
         month_layout.addWidget(QLabel("Año"))
         month_layout.addWidget(self.month_year_input)
+        self.month_weekly_check = QCheckBox("Por semanas")
+        self.month_weekly_check.setChecked(True)
+        month_layout.addWidget(self.month_weekly_check)
         month_layout.addStretch()
         self.scope_tabs.addTab(month_tab, "Por mes")
 
@@ -118,6 +121,7 @@ class ExpenseChartView(QWidget):
         self.year_input.valueChanged.connect(self._generate)
         self.month_year_input.valueChanged.connect(self._generate)
         self.month_input.currentIndexChanged.connect(self._generate)
+        self.month_weekly_check.toggled.connect(self._generate)
         self.start_date_input.dateChanged.connect(self._range_dates_changed)
         self.end_date_input.dateChanged.connect(self._range_dates_changed)
         self.week_precision.toggled.connect(self._precision_toggled)
@@ -162,7 +166,8 @@ class ExpenseChartView(QWidget):
             month = self.month_input.currentIndex() + 1
             start_date = date(year, month, 1)
             end_date = date(year, month, monthrange(year, month)[1])
-            return start_date, end_date, "week"
+            period_unit = "week" if self.month_weekly_check.isChecked() else "month"
+            return start_date, end_date, period_unit
 
         start_date = self.start_date_input.date().toPython()
         end_date = self.end_date_input.date().toPython()

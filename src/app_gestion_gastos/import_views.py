@@ -3,10 +3,15 @@ import sqlite3
 from PySide6.QtCore import Signal
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QCompleter,
+    QDateEdit,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -19,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from app_gestion_gastos.csv_importer import CsvImportError
 from app_gestion_gastos.pdf_importer import PdfImportError
+from app_gestion_gastos.models import ImportItemSummary, ImportJobSummary
 from app_gestion_gastos.services import ExpenseService
 
 
@@ -44,11 +50,19 @@ class ImportJobsView(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.itemDoubleClicked.connect(self._open_items_popup)
 
         layout = QVBoxLayout(self)
         layout.addLayout(buttons)
         layout.addWidget(self.table)
         self.refresh()
+
+    def _open_items_popup(self, item: QTableWidgetItem) -> None:
+        row = item.row()
+        jobs = self._service.list_import_jobs()
+        target = jobs[row]
+        dialog = ImportItemsPopup(self._service, target, self)
+        dialog.exec()
 
     def refresh(self) -> None:
         jobs = self._service.list_import_jobs()
@@ -168,6 +182,59 @@ class SubcategoryDelegate(QStyledItemDelegate):
     def setModelData(self, editor, model, index):
         model.setData(index, editor.currentText(), Qt.ItemDataRole.DisplayRole)
 
+
+class ImportItemsPopup(QDialog):
+    def __init__(
+        self,
+        service: ExpenseService,
+        job: ImportJobSummary,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._service = service
+        self.setWindowTitle(f"Líneas de importación — {job.filename or 'sin nombre'}")
+        self.setModal(True)
+        self.resize(700, 400)
+
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(
+            ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha", "Estado"]
+        )
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.horizontalHeader().setStretchLastSection(True)
+
+        self._load_items(job)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table)
+        layout.addWidget(buttons)
+
+    def _load_items(self, job: ImportJobSummary) -> None:
+        items = self._service.list_import_items_for_job(job.id)
+        self._fill_table(items)
+
+    def _fill_table(self, items: list[ImportItemSummary]) -> None:
+        self.table.setRowCount(len(items))
+        for row_index, item in enumerate(items):
+            values = (
+                item.raw_description,
+                item.user_description or "",
+                f"{item.amount:.2f}",
+                item.category or "",
+                item.subcategory or "",
+                item.expense_date.isoformat(),
+                item.status,
+            )
+            for column_index, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                cell.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self.table.setItem(row_index, column_index, cell)
+
+    import_completed = Signal()
 
 class PendingImportItemsView(QWidget):
     import_completed = Signal()

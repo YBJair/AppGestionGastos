@@ -73,9 +73,22 @@ class ImportProcessingResult:
 
 @dataclass(frozen=True, slots=True)
 class ImportJobSummary:
+    id: int
     filename: str | None
     source_type: str
     imported_at: str
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class ImportItemSummary:
+    id: int
+    raw_description: str
+    user_description: str | None
+    amount: Decimal
+    category: str | None
+    subcategory: str | None
+    expense_date: date
     status: str
 
 

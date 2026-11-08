@@ -14,6 +14,7 @@ from app_gestion_gastos.models import (
     ExpenseBreakdown,
     ExpenseSuggestion,
     ImportClassification,
+    ImportItemSummary,
     ImportJobSummary,
     ImportProcessingResult,
     ParsedCsvExpense,
@@ -129,14 +130,53 @@ class SQLiteDatabase:
     def list_import_jobs(self) -> list[ImportJobSummary]:
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT filename, source_type, imported_at, status "
+                "SELECT id, filename, source_type, imported_at, status "
                 "FROM import_jobs ORDER BY imported_at DESC, id DESC"
             )
             return [
                 ImportJobSummary(
+                    id=row["id"],
                     filename=row["filename"],
                     source_type=row["source_type"],
                     imported_at=row["imported_at"],
+                    status=row["status"],
+                )
+                for row in rows
+            ]
+
+    def list_import_items_for_job(self, import_job_id: int) -> list[ImportItemSummary]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    import_items.id,
+                    import_items.raw_description,
+                    import_items.user_description,
+                    import_items.amount,
+                    categories.name AS category,
+                    subcategories.name AS subcategory,
+                    import_items.expense_date,
+                    import_items.status
+                FROM import_items
+                LEFT JOIN categories ON categories.id = import_items.category_id
+                LEFT JOIN subcategories ON subcategories.id = import_items.subcategory_id
+                WHERE import_items.import_job_id = ?
+                ORDER BY
+                    CASE WHEN import_items.status = 'pending' THEN 0 ELSE 1 END,
+                    import_items.expense_date ASC,
+                    import_items.id ASC
+                """,
+                (import_job_id,),
+            )
+            return [
+                ImportItemSummary(
+                    id=row["id"],
+                    raw_description=row["raw_description"],
+                    user_description=row["user_description"],
+                    amount=Decimal(row["amount"]) / 100,
+                    category=row["category"],
+                    subcategory=row["subcategory"],
+                    expense_date=date.fromisoformat(row["expense_date"]),
                     status=row["status"],
                 )
                 for row in rows

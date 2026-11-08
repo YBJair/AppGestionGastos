@@ -9,6 +9,7 @@ from app_gestion_gastos.models import (
     ExpenseBreakdown,
     ExpenseSuggestion,
     ImportClassification,
+    ImportItemSummary,
     ImportJobSummary,
     ImportProcessingResult,
     ParsedCsvExpense,
@@ -68,6 +69,8 @@ class ExpenseRepository(Protocol):
     ) -> None: ...
 
     def list_import_jobs(self) -> list[ImportJobSummary]: ...
+
+    def list_import_items_for_job(self, import_job_id: int) -> list[ImportItemSummary]: ...
 
     def list_pending_import_items(
         self, classification: Literal["similar", "unknown"]
@@ -198,6 +201,9 @@ class ExpenseService:
 
     def list_import_jobs(self) -> list[ImportJobSummary]:
         return self._repository.list_import_jobs()
+
+    def list_import_items_for_job(self, import_job_id: int) -> list[ImportItemSummary]:
+        return self._repository.list_import_items_for_job(import_job_id)
 
     def list_pending_import_items(
         self, classification: Literal["similar", "unknown"]

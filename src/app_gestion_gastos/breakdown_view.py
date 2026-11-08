@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDateEdit,
     QHBoxLayout,
     QHeaderView,
@@ -67,6 +68,8 @@ class ExpenseBreakdownView(QWidget):
 
         self.generate_button = QPushButton("Generar desglose")
         self.generate_button.clicked.connect(self._generate)
+        self.investments_check = QCheckBox("Inversiones")
+        self.investments_check.toggled.connect(self._generate)
         self.period_tabs.currentChanged.connect(self._generate)
         self.year_input.valueChanged.connect(self._generate)
         self.start_date_input.dateChanged.connect(self._generate)
@@ -85,7 +88,11 @@ class ExpenseBreakdownView(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.period_tabs)
-        layout.addWidget(self.generate_button, alignment=Qt.AlignmentFlag.AlignRight)
+        options_layout = QHBoxLayout()
+        options_layout.addWidget(self.generate_button)
+        options_layout.addWidget(self.investments_check)
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
         layout.addWidget(self.results_tree, 1)
         layout.addWidget(self.total_label)
         self._generate()
@@ -102,9 +109,13 @@ class ExpenseBreakdownView(QWidget):
                 QMessageBox.warning(self, "Rango no valido", "La fecha final debe ser posterior.")
                 return
 
-        entries = self._service.get_breakdown_between_dates(start_date, end_date)
+        entries = self._service.get_breakdown_between_dates(
+            start_date, end_date, self.investments_check.isChecked()
+        )
         self._render_entries(entries)
-        total = self._service.get_total_between_dates(start_date, end_date)
+        total = self._service.get_total_between_dates(
+            start_date, end_date, self.investments_check.isChecked()
+        )
         self.total_label.setText(f"Total: {self._format_amount(total)}")
 
     def _render_entries(self, entries: list[ExpenseBreakdown]) -> None:

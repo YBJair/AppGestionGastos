@@ -1019,25 +1019,40 @@ class SQLiteDatabase:
             (start, end, category_id),
         )
 
-    def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal:
+    def get_total_between_dates(
+        self, start_date: date, end_date: date, exclude_investments: bool = False
+    ) -> Decimal:
         if end_date < start_date:
             raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
         with self.connect() as connection:
-            row = connection.execute(
+            query = (
                 "SELECT COALESCE(SUM(amount), 0) AS total "
-                "FROM expenses WHERE expense_date BETWEEN ? AND ?",
-                (start_date.isoformat(), end_date.isoformat()),
-            ).fetchone()
+                "FROM expenses WHERE expense_date BETWEEN ? AND ?"
+            )
+            params: tuple[object, ...] = (start_date.isoformat(), end_date.isoformat())
+            if exclude_investments:
+                query += (
+                    " AND (categories.name IS NULL OR categories.name <> 'Inversiones')"
+                )
+                # join needed only when excluding; expenses LEFT JOIN categories already
+                # not present, so add it
+                query = (
+                    "SELECT COALESCE(SUM(expenses.amount), 0) AS total "
+                    "FROM expenses "
+                    "LEFT JOIN categories ON categories.id = expenses.category_id "
+                    "WHERE expenses.expense_date BETWEEN ? AND ? "
+                    "AND (categories.name IS NULL OR categories.name <> 'Inversiones')"
+                )
+            row = connection.execute(query, params).fetchone()
         return Decimal(row["total"]) / 100
 
     def get_breakdown_between_dates(
-        self, start_date: date, end_date: date
+        self, start_date: date, end_date: date, exclude_investments: bool = False
     ) -> list[ExpenseBreakdown]:
         if end_date < start_date:
             raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
         with self.connect() as connection:
-            rows = connection.execute(
-                """
+            query = """
                 SELECT
                     strftime('%Y-%m', expenses.expense_date) AS month,
                     COALESCE(categories.name, 'Sin categoria') AS category,
@@ -1047,11 +1062,17 @@ class SQLiteDatabase:
                 LEFT JOIN categories ON categories.id = expenses.category_id
                 LEFT JOIN subcategories ON subcategories.id = expenses.subcategory_id
                 WHERE expenses.expense_date BETWEEN ? AND ?
-                GROUP BY month, category, subcategory
-                ORDER BY month, category COLLATE NOCASE, subcategory COLLATE NOCASE
-                """,
-                (start_date.isoformat(), end_date.isoformat()),
-            ).fetchall()
+            """
+            params: tuple[object, ...] = (start_date.isoformat(), end_date.isoformat())
+            if exclude_investments:
+                query += (
+                    " AND (categories.name IS NULL OR categories.name <> 'Inversiones')"
+                )
+            query += (
+                " GROUP BY month, category, subcategory "
+                "ORDER BY month, category COLLATE NOCASE, subcategory COLLATE NOCASE"
+            )
+            rows = connection.execute(query, params).fetchall()
         return [
             ExpenseBreakdown(
                 month=row["month"],
@@ -1068,6 +1089,7 @@ class SQLiteDatabase:
         end_date: date,
         period_unit: Literal["month", "week"],
         by_category: bool,
+        exclude_investments: bool = False,
     ) -> list[ChartData]:
         if end_date < start_date:
             raise ValueError("La fecha final debe ser igual o posterior a la inicial.")
@@ -1087,7 +1109,7 @@ class SQLiteDatabase:
         category_group = ", category" if by_category else ""
         category_join = (
             "LEFT JOIN categories ON categories.id = expenses.category_id "
-            if by_category
+            if by_category or exclude_investments
             else ""
         )
         category_order = ", category COLLATE NOCASE" if by_category else ""
@@ -1097,12 +1119,17 @@ class SQLiteDatabase:
             "FROM expenses "
             f"{category_join}"
             "WHERE expenses.expense_date BETWEEN ? AND ? "
-            f"GROUP BY period{category_group} "
-            f"ORDER BY period{category_order}"
         )
+        params: tuple[object, ...] = (start_date.isoformat(), end_date.isoformat())
+        if exclude_investments:
+            query += (
+                "AND (categories.name IS NULL OR categories.name <> 'Inversiones') "
+            )
+        query += f"GROUP BY period{category_group} "
+        query += f"ORDER BY period{category_order}"
         with self.connect() as connection:
             rows = connection.execute(
-                query, (start_date.isoformat(), end_date.isoformat())
+                query, params
             ).fetchall()
         return [
             ChartData(

@@ -92,10 +92,12 @@ class ExpenseRepository(Protocol):
         self, year: int, week: int, category_id: int
     ) -> list[Expense]: ...
 
-    def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal: ...
+    def get_total_between_dates(
+        self, start_date: date, end_date: date, exclude_investments: bool = False
+    ) -> Decimal: ...
 
     def get_breakdown_between_dates(
-        self, start_date: date, end_date: date
+        self, start_date: date, end_date: date, exclude_investments: bool = False
     ) -> list[ExpenseBreakdown]: ...
 
     def get_chart_data(
@@ -104,6 +106,7 @@ class ExpenseRepository(Protocol):
         end_date: date,
         period_unit: Literal["month", "week"],
         by_category: bool,
+        exclude_investments: bool = False,
     ) -> list[ChartData]: ...
 
 
@@ -233,13 +236,19 @@ class ExpenseService:
     ) -> list[Expense]:
         return self._repository.get_expenses_for_week_and_category(year, week, category_id)
 
-    def get_total_between_dates(self, start_date: date, end_date: date) -> Decimal:
-        return self._repository.get_total_between_dates(start_date, end_date)
+    def get_total_between_dates(
+        self, start_date: date, end_date: date, exclude_investments: bool = False
+    ) -> Decimal:
+        return self._repository.get_total_between_dates(
+            start_date, end_date, exclude_investments
+        )
 
     def get_breakdown_between_dates(
-        self, start_date: date, end_date: date
+        self, start_date: date, end_date: date, exclude_investments: bool = False
     ) -> list[ExpenseBreakdown]:
-        return self._repository.get_breakdown_between_dates(start_date, end_date)
+        return self._repository.get_breakdown_between_dates(
+            start_date, end_date, exclude_investments
+        )
 
     def get_chart_data(
         self,
@@ -247,5 +256,8 @@ class ExpenseService:
         end_date: date,
         period_unit: Literal["month", "week"],
         by_category: bool,
+        exclude_investments: bool = False,
     ) -> list[ChartData]:
-        return self._repository.get_chart_data(start_date, end_date, period_unit, by_category)
+        return self._repository.get_chart_data(
+            start_date, end_date, period_unit, by_category, exclude_investments
+        )

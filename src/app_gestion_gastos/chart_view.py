@@ -101,6 +101,7 @@ class ExpenseChartView(QWidget):
 
         self.categories_check = QCheckBox("Por categorías")
         self.totals_check = QCheckBox("Totales por período")
+        self.investments_check = QCheckBox("Inversiones")
         self.chart_mode_group = QButtonGroup(self)
         self.chart_mode_group.setExclusive(True)
         self.chart_mode_group.addButton(self.categories_check)
@@ -128,10 +129,12 @@ class ExpenseChartView(QWidget):
         self.month_precision.toggled.connect(self._precision_toggled)
         self.categories_check.toggled.connect(self._chart_mode_toggled)
         self.totals_check.toggled.connect(self._chart_mode_toggled)
+        self.investments_check.toggled.connect(self._generate)
 
         options_layout = QHBoxLayout()
         options_layout.addWidget(self.categories_check)
         options_layout.addWidget(self.totals_check)
+        options_layout.addWidget(self.investments_check)
         options_layout.addStretch()
         options_layout.addWidget(self.generate_button)
         layout = QVBoxLayout(self)
@@ -153,6 +156,7 @@ class ExpenseChartView(QWidget):
             end_date,
             period_unit,
             self.categories_check.isChecked(),
+            self.investments_check.isChecked(),
         )
         self._draw_chart(chart_data, period_unit)
 

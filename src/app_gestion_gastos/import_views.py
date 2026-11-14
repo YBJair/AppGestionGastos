@@ -1,4 +1,5 @@
 import sqlite3
+from decimal import Decimal
 
 from PySide6.QtCore import Signal
 from PySide6.QtCore import Qt
@@ -330,8 +331,16 @@ class PendingImportItemsView(QWidget):
             subcategory = self.table.item(row, 4).text().strip()
             generic = self.table.item(row, 6).checkState() == Qt.CheckState.Checked
             import_item_id = self.table.item(row, 7).data(Qt.ItemDataRole.UserRole)
+
+            amount_text = (
+                self.table.item(row, 2).text().strip().replace("€", "").replace(" ", "")
+            )
+            if "," in amount_text:
+                amount_text = amount_text.replace(".", "").replace(",", ".")
+            amount_cents = int(Decimal(amount_text) * 100)
+
             self._service.accept_import_item_with_data(
-                import_item_id, alias, category, subcategory, generic
+                import_item_id, alias, category, subcategory, generic, amount_cents
             )
         except Exception as error:
             self.table.blockSignals(True)

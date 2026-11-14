@@ -458,6 +458,7 @@ class SQLiteDatabase:
         category: str,
         subcategory: str,
         generic: bool = False,
+        amount_cents: int | None = None,
     ) -> None:
         with self.connect() as connection:
             item = connection.execute(
@@ -474,6 +475,11 @@ class SQLiteDatabase:
             subcategory = subcategory.strip()
             if not user_description or not category or not subcategory:
                 raise ValueError("Completa alias, categoría y subcategoría antes de aceptar.")
+
+            if amount_cents is not None and amount_cents <= 0:
+                raise ValueError("El importe debe ser mayor que cero.")
+
+            effective_amount = amount_cents if amount_cents is not None else item["amount"]
 
             connection.execute(
                 "INSERT INTO categories (name) VALUES (?) ON CONFLICT(name) DO NOTHING",
@@ -502,17 +508,17 @@ class SQLiteDatabase:
             connection.execute(
                 """
                 UPDATE import_items
-                SET user_description = ?, category_id = ?, subcategory_id = ?, generic = ?
+                SET user_description = ?, category_id = ?, subcategory_id = ?, generic = ?, amount = ?
                 WHERE id = ?
                 """,
-                (user_description, category_id, subcategory_id, int(generic), import_item_id),
+                (user_description, category_id, subcategory_id, int(generic), effective_amount, import_item_id),
             )
 
             if item["classification"] == "unknown":
                 connection.execute(
                     """
                     UPDATE import_items
-                    SET user_description = ?, category_id = ?, subcategory_id = ?
+                    SET user_description = ?, category_id = ?, subcategory_id = ?, amount = ?
                     WHERE import_job_id = ?
                       AND normalized_description = ?
                       AND status = 'pending'
@@ -523,6 +529,7 @@ class SQLiteDatabase:
                         user_description,
                         category_id,
                         subcategory_id,
+                        effective_amount,
                         item["import_job_id"],
                         item["normalized_description"],
                         import_item_id,

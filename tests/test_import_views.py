@@ -1,10 +1,13 @@
 import os
+from datetime import date
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from app_gestion_gastos.csv_importer import parse_expense_csv
@@ -162,6 +165,62 @@ def test_csv_button_imports_all_rows_and_creates_categories_and_expenses(tmp_pat
     assert database.list_categories() == ["Hogar"]
     assert database.list_subcategories("Hogar") == ["Cocina"]
     information.assert_called_once()
+    application.processEvents()
+
+
+def test_edited_amount_is_saved_when_accepting_import_item(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    database = SQLiteDatabase(tmp_path / "edited-amount.sqlite3")
+    database.initialize()
+    with database.connect() as connection:
+        job_id = connection.execute(
+            "INSERT INTO import_jobs (filename, source_type, imported_at, status) VALUES (?, ?, ?, 'processed')",
+            ("extracto.csv", "csv", "2026-10-20T12:30:00Z"),
+        ).lastrowid
+        connection.execute(
+            """
+            INSERT INTO import_items (
+                import_job_id, raw_description, user_description, normalized_description,
+                amount, expense_date, category_id, subcategory_id, classification, status
+            ) VALUES (?, 'Cargo banco', NULL, 'cargo banco', 2599, '2026-10-20', NULL, NULL, 'unknown', 'pending')
+            """,
+            (job_id,),
+        )
+
+    service = ExpenseService(database)
+    view = PendingImportItemsView(service, "unknown")
+    application.processEvents()
+
+    assert view.table.rowCount() == 1
+
+    # Editar el importe de 25,99 € a 35,00 €
+    amount_cell = view.table.item(0, 2)
+    amount_cell.setText("35,00 €")
+    # También hay que establecer categoría y subcategoría para poder aceptar
+    view.table.item(0, 3).setText("Hogar")
+    view.table.item(0, 4).setText("General")
+
+    # Marcar OK
+    ok_item = view.table.item(0, 7)
+    ok_item.setCheckState(Qt.CheckState.Checked)
+    application.processEvents()
+
+    # La línea ya no debería estar pendiente
+    pending = database.list_pending_import_items("unknown")
+    assert len(pending) == 0
+
+    # El item debería estar aceptado con el nuevo importe
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT amount, status FROM import_items WHERE raw_description = 'Cargo banco'"
+        ).fetchone()
+        assert row["amount"] == 3500
+        assert row["status"] == "accepted"
+
+    # El gasto creado debería tener el nuevo importe
+    expenses = database.list_all()
+    assert len(expenses) == 1
+    assert expenses[0].amount == Decimal("35.00")
     application.processEvents()
 
 

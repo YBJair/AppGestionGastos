@@ -66,6 +66,7 @@ class ExpenseRepository(Protocol):
         category: str,
         subcategory: str,
         generic: bool = False,
+        amount_cents: int | None = None,
     ) -> None: ...
 
     def list_import_jobs(self) -> list[ImportJobSummary]: ...
@@ -194,9 +195,10 @@ class ExpenseService:
         category: str,
         subcategory: str,
         generic: bool = False,
+        amount_cents: int | None = None,
     ) -> None:
         self._repository.accept_import_item_with_data(
-            import_item_id, user_description, category, subcategory, generic
+            import_item_id, user_description, category, subcategory, generic, amount_cents
         )
 
     def delete_import_items(self, import_item_ids: list[int]) -> None:

@@ -158,7 +158,8 @@ class ExpenseChartView(QWidget):
             self.categories_check.isChecked(),
             self.investments_check.isChecked(),
         )
-        self._draw_chart(chart_data, period_unit)
+        total = sum((item.amount for item in chart_data), Decimal("0"))
+        self._draw_chart(chart_data, period_unit, total)
 
     def _selected_period(self) -> tuple[date, date, str] | None:
         selected_tab = self.scope_tabs.currentIndex()
@@ -208,7 +209,7 @@ class ExpenseChartView(QWidget):
         if checked:
             self._generate()
 
-    def _draw_chart(self, chart_data, period_unit: str) -> None:
+    def _draw_chart(self, chart_data, period_unit: str, total: Decimal | None = None) -> None:
         self.axes.clear()
         self._bar_artists.clear()
         self._hover_bar = None
@@ -268,6 +269,8 @@ class ExpenseChartView(QWidget):
         self.axes.set_xticks(positions, labels)
         self.axes.tick_params(axis="x", labelrotation=35)
         self.axes.set_ylabel("Importe (€)")
+        if total is not None:
+            self.axes.set_title(f"Gastos — Total: {self._format_amount(total)}")
         self.axes.grid(axis="y", alpha=0.25)
         self.axes.set_axisbelow(True)
         self.canvas.figure.tight_layout()

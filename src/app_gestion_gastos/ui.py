@@ -15,12 +15,13 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QTableWidget,
     QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from app_gestion_gastos.sortable_table import SortableTableWidget
 from rapidfuzz import fuzz, process
 
 from app_gestion_gastos.breakdown_view import ExpenseBreakdownView
@@ -291,13 +292,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AppGestionGastos")
         self.resize(820, 480)
 
-        self.table = QTableWidget(0, 7)
+        self.table = SortableTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
             ["Fecha", "Descripcion", "Importe", "Categoria", "Subcategoria", "Generico", "Seleccionar"]
         )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.set_non_sortable_columns({6})
         self._loading_table = False
         self.table.itemChanged.connect(self._expense_cell_changed)
 
@@ -352,7 +354,10 @@ class MainWindow(QMainWindow):
             )
             for column_index, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                if column_index == 2:
+                if column_index == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, expense.spent_on)
+                elif column_index == 2:
+                    item.setData(Qt.ItemDataRole.UserRole, expense.amount)
                     alignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     item.setTextAlignment(alignment)
                 self.table.setItem(row_index, column_index, item)
@@ -365,6 +370,7 @@ class MainWindow(QMainWindow):
             generic_item.setCheckState(
                 Qt.CheckState.Checked if expense.generic else Qt.CheckState.Unchecked
             )
+            generic_item.setData(Qt.ItemDataRole.UserRole, expense.generic)
             self.table.setItem(row_index, 5, generic_item)
 
             checked_item = QTableWidgetItem()
@@ -376,6 +382,7 @@ class MainWindow(QMainWindow):
             checked_item.setCheckState(Qt.CheckState.Unchecked)
             checked_item.setData(Qt.ItemDataRole.UserRole, expense.id)
             self.table.setItem(row_index, 6, checked_item)
+        self.table.apply_saved_sort()
         self._loading_table = False
         self.chart_view.refresh()
         self.import_jobs_view.refresh()

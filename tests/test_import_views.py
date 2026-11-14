@@ -242,3 +242,108 @@ def test_csv_parser_error_does_not_create_import_job(tmp_path) -> None:
     with database.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM import_items").fetchone()[0] == 0
+
+
+def _add_expense(database: SQLiteDatabase, description: str, day: int, category: str = "Hogar") -> None:
+    from app_gestion_gastos.models import Expense
+
+    database.add(
+        Expense(
+            category=category,
+            description=description,
+            amount=Decimal("10.00"),
+            spent_on=date(2026, 10, day),
+            subcategory="General",
+        )
+    )
+
+
+def test_expenses_default_sort_is_date_descending(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    database = SQLiteDatabase(tmp_path / "sort-expenses.sqlite3")
+    database.initialize()
+    _add_expense(database, "Primero", 1)
+    _add_expense(database, "Segundo", 5)
+    _add_expense(database, "Tercero", 10)
+
+    window = MainWindow(ExpenseService(database))
+    application.processEvents()
+
+    dates = [
+        window.table.item(row, 0).text() for row in range(window.table.rowCount())
+    ]
+    assert dates == ["2026-10-10", "2026-10-05", "2026-10-01"]
+
+
+def test_expenses_click_header_sorts_ascending_and_descending(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    database = SQLiteDatabase(tmp_path / "sort-toggle.sqlite3")
+    database.initialize()
+    _add_expense(database, "A", 1)
+    _add_expense(database, "B", 2)
+    _add_expense(database, "C", 3)
+
+    window = MainWindow(ExpenseService(database))
+    application.processEvents()
+
+    # Clic en columna "Descripcion" (col 1): orden ascendente
+    window.table.horizontalHeader().sectionClicked.emit(1)
+    application.processEvents()
+
+    descriptions = [
+        window.table.item(row, 1).text() for row in range(window.table.rowCount())
+    ]
+    assert descriptions == ["A", "B", "C"]
+
+    # Clic otra vez en la misma columna: orden descendente
+    window.table.horizontalHeader().sectionClicked.emit(1)
+    application.processEvents()
+
+    descriptions = [
+        window.table.item(row, 1).text() for row in range(window.table.rowCount())
+    ]
+    assert descriptions == ["C", "B", "A"]
+
+
+def test_import_jobs_default_sort_is_date_descending(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    database = SQLiteDatabase(tmp_path / "sort-jobs.sqlite3")
+    database.initialize()
+    _insert_job(database, "enero.csv", "csv", "2026-01-15T10:00:00Z")
+    _insert_job(database, "febrero.csv", "csv", "2026-02-20T12:00:00Z")
+    _insert_job(database, "marzo.csv", "csv", "2026-03-10T09:00:00Z")
+
+    view = ImportJobsView(ExpenseService(database))
+    application.processEvents()
+
+    filenames = [
+        view.table.item(row, 0).text() for row in range(view.table.rowCount())
+    ]
+    assert filenames == ["marzo.csv", "febrero.csv", "enero.csv"]
+
+
+def test_pending_items_default_sort_is_date_descending(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    database = SQLiteDatabase(tmp_path / "sort-items.sqlite3")
+    database.initialize()
+    job_id = _insert_job(database, "extracto.csv", "csv", "2026-10-31T12:30:00Z")
+
+    with database.connect() as connection:
+        for day, desc in [(1, "Uno"), (10, "Diez"), (5, "Cinco")]:
+            connection.execute(
+                """
+                INSERT INTO import_items (
+                    import_job_id, raw_description, user_description, normalized_description,
+                    amount, expense_date, category_id, subcategory_id, classification, status
+                ) VALUES (?, ?, NULL, NULL, 1000, ?, NULL, NULL, 'unknown', 'pending')
+                """,
+                (job_id, desc, f"2026-10-{day:02d}"),
+            )
+
+    view = PendingImportItemsView(ExpenseService(database), "unknown")
+    application.processEvents()
+
+    descriptions = [
+        view.table.item(row, 0).text() for row in range(view.table.rowCount())
+    ]
+    assert descriptions == ["Diez", "Cinco", "Uno"]

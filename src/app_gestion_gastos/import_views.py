@@ -17,11 +17,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStyledItemDelegate,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+
+from app_gestion_gastos.sortable_table import SortableTableWidget
 
 from app_gestion_gastos.csv_importer import CsvImportError
 from app_gestion_gastos.pdf_importer import PdfImportError
@@ -46,12 +47,15 @@ class ImportJobsView(QWidget):
         buttons.addWidget(self.import_pdf_button)
         buttons.addStretch()
 
-        self.table = QTableWidget(0, 4)
+        self.table = SortableTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Fichero", "Tipo", "Fecha", "Estado"])
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.itemDoubleClicked.connect(self._open_items_popup)
+
+        self.table._sort_column = 2
+        self.table._sort_order = Qt.SortOrder.DescendingOrder
 
         layout = QVBoxLayout(self)
         layout.addLayout(buttons)
@@ -69,14 +73,19 @@ class ImportJobsView(QWidget):
         jobs = self._service.list_import_jobs()
         self.table.setRowCount(len(jobs))
         for row_index, job in enumerate(jobs):
+            date_text = job.imported_at.replace("T", " ").removesuffix("Z")
             values = (
                 job.filename or "",
                 job.source_type.upper(),
-                job.imported_at.replace("T", " ").removesuffix("Z"),
+                date_text,
                 job.status,
             )
             for column_index, value in enumerate(values):
-                self.table.setItem(row_index, column_index, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                if column_index == 2:
+                    item.setData(Qt.ItemDataRole.UserRole, date_text)
+                self.table.setItem(row_index, column_index, item)
+        self.table.apply_saved_sort()
 
     def _select_csv_file(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -197,7 +206,7 @@ class ImportItemsPopup(QDialog):
         self.setModal(True)
         self.resize(700, 400)
 
-        self.table = QTableWidget(0, 7)
+        self.table = SortableTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
             ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha", "Estado"]
         )
@@ -250,13 +259,16 @@ class PendingImportItemsView(QWidget):
         self._service = service
         self._classification = classification
 
-        self.table = QTableWidget(0, 8)
+        self.table = SortableTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
             ["Descripción", "Alias", "Cantidad", "Categoría", "Subcategoría", "Fecha", "Genérico", "OK"]
         )
-        self.table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.set_non_sortable_columns({7})
+        self.table._sort_column = 5
+        self.table._sort_order = Qt.SortOrder.DescendingOrder
         self.table.setItemDelegateForColumn(1, AliasDelegate(service))
         self.table.setItemDelegateForColumn(3, CategoryDelegate(service))
         self.table.setItemDelegateForColumn(4, SubcategoryDelegate(service))
@@ -292,6 +304,10 @@ class PendingImportItemsView(QWidget):
                     | Qt.ItemFlag.ItemIsSelectable
                     | Qt.ItemFlag.ItemIsEditable
                 )
+                if column_index == 2:
+                    cell.setData(Qt.ItemDataRole.UserRole, item.amount)
+                elif column_index == 5:
+                    cell.setData(Qt.ItemDataRole.UserRole, item.expense_date)
                 self.table.setItem(row_index, column_index, cell)
 
             generic_item = QTableWidgetItem()
@@ -303,6 +319,7 @@ class PendingImportItemsView(QWidget):
             generic_item.setCheckState(
                 Qt.CheckState.Checked if item.generic else Qt.CheckState.Unchecked
             )
+            generic_item.setData(Qt.ItemDataRole.UserRole, item.generic)
             self.table.setItem(row_index, 6, generic_item)
 
             ok_item = QTableWidgetItem()
@@ -314,6 +331,7 @@ class PendingImportItemsView(QWidget):
             ok_item.setCheckState(Qt.CheckState.Unchecked)
             ok_item.setData(Qt.ItemDataRole.UserRole, item.id)
             self.table.setItem(row_index, 7, ok_item)
+        self.table.apply_saved_sort()
         self._loading = False
 
     def _item_changed(self, item):
